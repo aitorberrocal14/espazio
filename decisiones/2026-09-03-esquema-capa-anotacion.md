@@ -778,9 +778,10 @@ anterior: **V1** era el criterio 28, **A6** sustituye al 18 y **U8** era el 11.
 - **La posición mostrada de las atribuciones.** Se registra durante la captura pero no se
   arrastra a la anotación consolidada. En una multiselección el efecto de posición es otra
   pregunta, y no está planteada.
-- **La entrevista para roles poco poblados.** Apuntada como mitigación de R10 y como la
-  única vía realista para los grupos que R9 deja permanentemente por debajo del umbral. Es
-  material cualitativo, no capa de anotación, y diseñarla es otra decisión.
+- **La entrevista para roles poco poblados.** Recogida en `PROYECTO.md` §8 como vía
+  obligada del diseño de investigación para los grupos que R9 deja permanentemente por
+  debajo del umbral. Es material cualitativo, no capa de anotación, y queda fuera de este
+  esquema por completo.
 - **El generador de datos sintéticos** en sí. Su especificación es otra decisión.
 - **La interfaz de captura.** Aquí solo se fija qué queda registrado.
 
@@ -851,6 +852,10 @@ el umbral los dos perfiles que se comparan**, así que quien manda no es el grup
 sino el pequeño. El hallazgo del proyecto —dónde el mismo espacio significa cosas
 distintas según quién lo habita— es precisamente el que primero se queda sin publicar.
 
+Esa consecuencia **ha dejado de ser un riesgo de esta decisión y es ya un límite del
+instrumento**: está en `PROYECTO.md` §8, donde le corresponde. Lo que queda aquí es su
+aritmética, que es lo que hay que meter en V1.
+
 Consecuencias prácticas, todas anteriores a la recogida: `Z` y `F` son variables de diseño
 y hay que fijarlas contra `P`, no al revés; reducir de cuatro franjas a dos casi duplica
 el techo de zonas; y agrupar zonas más gruesas compra publicabilidad a costa de
@@ -871,10 +876,10 @@ limpieza y ninguna de PDI es un resultado que va al informe, junto al análisis 
 mismo peso, no una nota de auditoría. Sin él, el resultado dirá «el edificio» y
 significará «quienes tienen despacho», y ninguna cifra publicada lo delatará.
 
-**Mitigación apuntada, no diseñada:** para los roles poco poblados la vía no es la
-anotación agregada —que R9 demuestra que nunca alcanzará el umbral— sino la **entrevista**.
-Es material cualitativo, se lee y no se agrega, como la nota libre de §5.1. Queda como
-pendiente en §5; diseñarla es otra decisión y no toca ahora.
+Para los roles poco poblados la vía no es la anotación agregada —que R9 demuestra que
+nunca alcanzará el umbral— sino la **entrevista**. Ya no es un pendiente de esta decisión:
+está en `PROYECTO.md` §8 como vía obligada del diseño de investigación. Diseñarla no es
+trabajo de la capa de anotación.
 
 **R11 — Sin etiqueta de lote por fila no hay remediación selectiva.** Si aparece un error
 de consolidación, no habrá forma de saber qué filas vinieron del lote defectuoso: habrá

@@ -9,7 +9,7 @@ y se modifica aquí antes de tocar código.
 
 Autor: Aitor Berrocal Lorda
 Estado: fase 0 (núcleo)
-Última revisión: 2026-09-03 — §5.2, orden de presentación
+Última revisión: 2026-09-03 — §5.2 (orden de presentación) y §8 (límites del umbral)
 
 ---
 
@@ -284,6 +284,23 @@ Van aquí porque condicionan el diseño, no porque queden bonitos.
   con dos o tres anotaciones. Esto es cartografía cualitativa densa con apoyo
   cuantitativo, **no estadística inferencial**. El riesgo del formato es que un mapa de
   calor bonito sugiera una robustez que la n no tiene.
+- **El umbral de agregación sesga qué comparaciones son publicables, y ese sesgo no es
+  neutral.** La protección de la privacidad y el objetivo sociológico empujan en
+  direcciones opuestas. Como la divergencia entre roles exige que **ambos** perfiles
+  superen el umbral, el techo lo fija siempre el grupo pequeño, y el instrumento queda
+  estructuralmente sesgado a publicar solo comparaciones entre grupos grandes. Los roles
+  cuya mirada es más distinta y más invisible —conserjería, limpieza, mantenimiento— son
+  precisamente los que no publicarán nunca. Se compone con el sesgo de selección de más
+  arriba: no solo participan menos, sino que lo que aportan tiene menos probabilidad de
+  llegar a un resultado. **No es un riesgo a mitigar ni un defecto de implementación: es
+  un límite del instrumento.** Aceptar el umbral es aceptar esto.
+- **Para los roles pequeños la vía es la entrevista, no la anotación.** De lo anterior se
+  sigue que la capa cuantitativa **no va a hablar** de conserjería, limpieza o
+  mantenimiento en ninguna organización donde esos grupos sean poco poblados. Si el diseño
+  de investigación quiere su mirada —y es la que mejor conoce el edificio físicamente—,
+  tiene que cubrirla por otra vía: entrevista, material cualitativo que se lee y no se
+  agrega, como la nota libre de §5.1. No hacerlo no es una omisión menor: es entregar un
+  mapa que dice «el edificio» y significa «quienes tienen despacho».
 - **La herramienta no decide.** Qué es un punto negro y qué es una zona fantasma
   deseable sigue siendo una cuestión política. Una sala vacía puede ser mala
   planificación o el único sitio tranquilo del edificio.
