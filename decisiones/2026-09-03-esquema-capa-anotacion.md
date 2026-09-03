@@ -98,6 +98,19 @@ Cinco mecanismos, todos verificables:
    entre dos celdas y ninguna es aislable.
 5. **Resolución espacial mínima.** Ninguna vista de `analisis` expone `recinto_id` ni
    `arista_id`. La única unidad espacial publicada es `zona`.
+6. **Resolución afectiva mínima.** El perfil publicado se emite sobre los ejes de
+   **valencia y activación**, nunca sobre el desglose de las ocho etiquetas. Publicar `n`
+   junto a ocho proporciones es publicar ocho recuentos exactos: con `n = 5`, una
+   proporción de 0,2 es una persona. La granularidad de etiqueta se almacena y se explota
+   en análisis interno dentro de la zona restringida; no sale por `analisis`.
+7. **El umbral cuenta personas, no anotaciones.** Una sola persona que anote cinco
+   espacios de una misma zona produce una celda de `n = 5` que es una única respondente:
+   el umbral, contado sobre anotaciones, no protege ahí nada. `analisis` exige
+   `n_sesiones ≥ 5` **además** de `n_anotaciones ≥ 5`. Como el identificador de sesión se
+   destruye al consolidar, `n_sesiones` se calcula **durante** la consolidación —cuando
+   las sesiones todavía existen— y se acumula en `anotacion.celda_recuento`; es aditivo
+   entre lotes porque cada sesión se consolida exactamente una vez. Es más estricto que la
+   letra de §7, que habla de anotaciones, y por eso no la contradice.
 
 Lo que esto **no** protege: un superusuario de Postgres puede reemplazar cualquier vista
 o función. La restricción protege frente a endpoints nuevos, exports descuidados, el rol
@@ -107,14 +120,16 @@ lo contrario sería vender humo.
 ### 2.3 No hay forma de agrupar por autor en el dato consolidado
 
 La sesión existe durante la recogida y se destruye al consolidar. Severar el
-identificador **no basta**: hay dos vías por las que las sesiones se reconstituyen solas,
-y las tres se cierran juntas.
+identificador **no basta**: hay cuatro vías por las que las sesiones se reconstituyen
+solas, y se cierran todas juntas.
 
 | vía de reconstitución | cierre |
 |---|---|
 | `sesion_id` en la fila consolidada | no existe la columna; `captura.sesion` se borra en la misma transacción |
 | timestamp exacto (diez anotaciones en cuatro minutos son una sesión) | el dato consolidado guarda `semana_iso` + `franja`, nunca el instante |
-| orden de inserción (PK secuencial, `consolidada_en` por fila) | PK `uuid` aleatoria —**prohibida** cualquier columna `serial`/`identity`/UUIDv7—, `consolidada_en` idéntico para todo el lote, e inserción en orden aleatorizado |
+| orden de inserción (PK secuencial) | PK `uuid` aleatoria —**prohibida** cualquier columna `serial`/`identity`/UUIDv7— e inserción en orden aleatorizado |
+| etiqueta de lote (`consolidada_en` por fila) | **la columna no existe.** Un lote agrupa más fino que semana + franja, y conservarla como fecha devolvería por la puerta de atrás la resolución diaria que se acaba de quitar. La auditoría vive en `anotacion.lote_consolidacion`, sin vínculo con las filas |
+| grupo compuesto por una sola sesión | la consolidación no emite ningún grupo `(campana, venue, grupo_rol, semana_iso, franja)` que provenga de una sola sesión |
 
 Además, el **token de un solo uso** que resuelve la deduplicación no se guarda asociado a
 la sesión: `captura.token` registra emisión y consumo y **no tiene FK ni columna que
@@ -124,6 +139,15 @@ el token sería un pseudónimo con otro nombre.
 La consolidación se ejecuta por **lotes de ≥ 5 sesiones**, o al cerrar la ventana de
 recogida de la campaña. Consolidar sesión a sesión devolvería la agrupación por la puerta
 de atrás.
+
+**Grupos unitarios.** Si una sesión es la única de su grupo `(campana, venue, grupo_rol,
+semana_iso, franja)`, consolidarla deja en la zona restringida un grupo que **es** esa
+sesión, íntegra. Esas anotaciones se **retienen** en `captura` hasta que otra sesión entre
+en su grupo; si al cerrar la campaña siguen solas, **no se consolidan y se descartan**, y
+el número de descartes queda registrado en `anotacion.lote_consolidacion`. Se cuenta
+porque el descarte no es neutral: cae sobre los roles con menos participación, que son
+justo los que §8 dice que ya están infrarrepresentados. Es pérdida de dato, es visible, y
+es preferible a conservar una sesión reconstruible.
 
 ### 2.4 La campaña hace del encargo institucional una restricción
 
@@ -153,7 +177,41 @@ ser una advertencia en un documento y pasa a ser estructura:
 Consecuencia deliberada: mezclar versiones en un análisis exige un acto explícito. No
 puede ocurrir por descuido.
 
-### 2.6 Esbozo del esquema
+### 2.6 La posición mostrada viaja con la anotación, y eso obliga a decidir sobre §5.2
+
+`permutacion_etiquetas` vive en `captura.sesion`, que se destruye al consolidar. Sin
+arrastrar nada, después de consolidar no queda forma de controlar el efecto de posición y
+la columna no sirve para lo que la justificaba. La anotación consolidada lleva por eso
+`posicion_etiqueta`: el índice, base 1, en el que apareció la etiqueta elegida dentro de
+la lista que se mostró a esa persona.
+
+**Esto arrastra un coste que hay que resolver antes de implementar.** Si el orden se
+aleatoriza **una vez por sesión**, como dice §5.2 literalmente, las anotaciones de una
+misma sesión comparten una única aplicación etiqueta → posición, y esa aplicación parcial
+es una huella: dentro de un grupo `(campana, venue, grupo_rol, semana_iso, franja)` se
+pueden agrupar por consistencia de esa aplicación y reconstruir sesiones. Es exactamente
+lo que §2.3 existe para impedir.
+
+Dos salidas, y hay que elegir una:
+
+- **Aleatorizar por anotación en lugar de por sesión** (recomendada). La posición queda
+  independiente entre anotaciones de una misma sesión, la huella desaparece y se conserva
+  el ordinal completo para modelar el efecto de posición. **Es un cambio a §5.2 y cae bajo
+  la regla 6 de CLAUDE.md: necesita tu aprobación explícita antes de implementarse.** No
+  invalida datos ya recogidos porque todavía no hay ninguno; después de la primera campaña
+  sí los invalidaría.
+- **Mantener la aleatorización por sesión** y degradar el campo a
+  `en_primera_posicion boolean`. Un bit por anotación agrupa mucho peor, y captura la
+  preocupación que §5.2 enuncia de verdad —«el primer elemento de una lista se elige
+  desproporcionadamente»—, a cambio de perder el ordinal.
+
+El esbozo de §2.7 escribe la primera. Si eliges la segunda, cambian el tipo de la columna
+y el criterio A7.
+
+La posición de las **atribuciones** no se arrastra: no lo pediste y en una multiselección
+el efecto de posición es otra pregunta. Queda anotado como pendiente en §5.
+
+### 2.7 Esbozo del esquema
 
 > Esto es especificación, no la migración. Los nombres, tipos y restricciones son
 > vinculantes; el reparto en archivos de migración lo decide quien implemente.
@@ -266,6 +324,23 @@ CREATE TABLE anotacion.zona_recinto (
 );
 -- anotacion.zona_arista: idéntica, contra nucleo.arista(id).
 
+-- La zonificación es una PARTICIÓN, no solo una familia disyunta. El EXCLUDE de arriba
+-- da la disyunción; la cobertura y la congelación son las otras dos mitades:
+
+CREATE FUNCTION anotacion.zona_particion_completa(p_venue uuid, p_ventana daterange)
+  RETURNS boolean LANGUAGE sql STABLE AS $$ /* ningún recinto ni arista del venue queda
+  fuera de toda zona en ningún instante de p_ventana */ $$;
+
+-- Trigger en anotacion.campana: no se abre la recogida si la partición no cubre el venue
+--   durante toda la ventana.
+-- Trigger en captura.anotacion_borrador: la entidad anclada debe pertenecer a una zona
+--   vigente en ese momento. Cierra el hueco de un recinto añadido a mitad de campaña, que
+--   de otro modo produciría anotaciones estructuralmente impublicables.
+-- CONGELACIÓN — trigger en anotacion.zona, zona_recinto y zona_arista: se rechaza
+--   cualquier INSERT/UPDATE/DELETE cuya validez solape la ventana de recogida de una
+--   campaña abierta. Repartir las zonas a mitad de recogida cambia retroactivamente la
+--   unidad de publicación y, con ella, qué celdas superan el umbral.
+
 CREATE TABLE anotacion.anotacion (
   id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),  -- v4, NUNCA secuencial
   campana_id           uuid     NOT NULL,
@@ -280,9 +355,9 @@ CREATE TABLE anotacion.anotacion (
   elicitacion          text     NOT NULL
                        CHECK (elicitacion IN ('espontanea','cierre_positivo')),
   lengua               text     NOT NULL CHECK (lengua IN ('es','eu')),
+  posicion_etiqueta    smallint NOT NULL CHECK (posicion_etiqueta >= 1),  -- §2.6
   semana_iso           date     NOT NULL,            -- lunes ISO. NUNCA el instante.
   franja               text     NOT NULL,
-  consolidada_en       timestamptz NOT NULL,         -- idéntico para todo el lote
   CHECK (num_nonnulls(recinto_id, arista_id) = 1),   -- §5.3: una entidad, exactamente
   CHECK (extract(isodow from semana_iso) = 1),
   FOREIGN KEY (campana_id, venue_id, version_instrumento)
@@ -295,7 +370,31 @@ CREATE TABLE anotacion.anotacion (
     REFERENCES instrumento.franja (version_id, codigo),
   UNIQUE (id, version_instrumento)
 );
--- NO existe columna de sesión, de participante, de departamento ni de instante exacto.
+-- NO existe columna de sesión, de participante, de departamento, de instante exacto
+-- ni de lote de consolidación.
+
+CREATE TABLE anotacion.celda_recuento (              -- §2.2 punto 7: el umbral cuenta personas
+  campana_id     uuid    NOT NULL,
+  zona_id        uuid    NOT NULL REFERENCES anotacion.zona(id),
+  grupo_rol      text    NOT NULL,
+  franja         text    NOT NULL,
+  n_anotaciones  integer NOT NULL CHECK (n_anotaciones >= 0),
+  n_sesiones     integer NOT NULL CHECK (n_sesiones    >= 0),
+  PRIMARY KEY (campana_id, zona_id, grupo_rol, franja),
+  CHECK (n_sesiones <= n_anotaciones)
+);
+-- Se acumula por lote durante la consolidación, mientras las sesiones aún existen.
+-- Guarda recuentos, nunca identificadores.
+
+CREATE TABLE anotacion.lote_consolidacion (          -- auditoría sin etiqueta por fila
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  campana_id     uuid NOT NULL REFERENCES anotacion.campana(id),
+  momento        timestamptz NOT NULL DEFAULT now(),
+  n_sesiones     integer NOT NULL,
+  n_anotaciones  integer NOT NULL,
+  n_descartadas  integer NOT NULL                    -- grupos unitarios al cierre, §2.3
+);
+-- No existe FK desde anotacion.anotacion hacia aquí: sería la etiqueta de lote otra vez.
 
 CREATE TABLE anotacion.atribucion_anotacion (        -- §5.1 paso 3, multiselección
   anotacion_id         uuid     NOT NULL,
@@ -345,16 +444,21 @@ CREATE TABLE captura.anotacion_borrador (
                CHECK (elicitacion IN ('espontanea','cierre_positivo')),
   momento      timestamptz NOT NULL DEFAULT now(),   -- exacto aquí, y solo aquí
   CHECK (num_nonnulls(recinto_id, arista_id) = 1),
-  UNIQUE (sesion_id, recinto_id),                    -- NULLS DISTINCT: no colisionan
-  UNIQUE (sesion_id, arista_id)
+  UNIQUE (sesion_id, recinto_id, elicitacion),       -- NULLS DISTINCT: no colisionan
+  UNIQUE (sesion_id, arista_id, elicitacion)
 );
 -- captura.atribucion_borrador y captura.nota_borrador: análogas, ON DELETE CASCADE.
 ```
 
 `permutacion_etiquetas` guarda el orden que se mostró de verdad. §5.2 exige aleatorizar
 porque el primer elemento se elige desproporcionadamente; guardar la permutación es lo
-único que permite **comprobar** que la aleatorización ocurrió y controlar el efecto de
-posición después. Es una columna, y sin ella el requisito no es verificable.
+único que permite **comprobar** que la aleatorización ocurrió. Lo que sobrevive a la
+consolidación es `anotacion.posicion_etiqueta`, con la decisión pendiente de §2.6.
+
+La unicidad incluye `elicitacion` a propósito: §5.5 cierra la sesión preguntando «¿hay
+algún sitio donde estés a gusto?», y la persona puede perfectamente nombrar un espacio que
+ya anotó espontáneamente. Sin `elicitacion` en la clave, el esquema prohibiría justo la
+respuesta que §5.5 va a buscar.
 
 #### `cualitativo` — notas libres
 
@@ -374,14 +478,39 @@ comprobable sobre `pg_depend`, no una convención.
 
 #### `analisis` — la superficie publicada
 
-Fase 0 publica lo mínimo para demostrar que el umbral se sostiene:
+Fase 0 publica lo mínimo para demostrar que el umbral se sostiene, y lo publica sobre los
+**ejes de valencia y activación**, nunca sobre el desglose de etiquetas:
 
-- `analisis.perfil_zona_rol` — una fila por `(campana, zona, grupo_rol, franja)` con `n`
-  y las proporciones por etiqueta, tras aplicar el umbral y la supresión complementaria
-  de §2.2. Proporciones, no recuentos por etiqueta.
-- `analisis.perfil_zona` — la marginal sobre roles, sujeta a la misma regla.
-- `analisis.cobertura_campana` — recuentos agregados por grupo de rol para medir
-  completitud sin identificador persistente, con el umbral aplicado.
+- `analisis.perfil_zona_rol` — una fila por `(campana, zona, grupo_rol, franja)` con
+  `n_anotaciones`, `valencia_media`, `activacion_media` e `intensidad_media`, tras aplicar
+  el umbral doble de §2.2 (puntos 6 y 7) y la supresión complementaria.
+- `analisis.perfil_zona` — la marginal sobre `grupo_rol`, sujeta a la misma regla.
+
+Y nada más.
+
+**Por qué no se publica el desglose por etiqueta.** Ocho proporciones junto a `n` son ocho
+recuentos exactos: con `n = 5`, una proporción de 0,2 es una persona diciendo `agobiante`
+sobre esa zona. Los dos ejes reducen el soporte publicado de ocho categorías nominales a
+dos escalas ordenadas cortas, y publican sumas en lugar de la distribución. La
+granularidad de etiqueta **se almacena** en `anotacion.anotacion` y se explota en análisis
+interno dentro de la zona restringida, por la vía de aprobación explícita de la regla 4 de
+CLAUDE.md; no sale por `analisis` ni alimenta ninguna vista.
+
+**Por qué tampoco se publica dispersión dentro de la celda.** §6 pide divergencia *entre*
+grupos, que se calcula a partir de los perfiles de grupo; la dispersión *dentro* de la
+celda no hace falta ni para §6.1 ni para §6.2, y con `n` pequeña la terna (n, media,
+varianza) sobre un soporte discreto corto identifica el multiconjunto con frecuencia. Se
+omite por eso, no por olvido.
+
+**Por qué `cobertura_campana` sale de la superficie publicada.** Era una marginal sobre
+zona y franja a la vez: el total por rol menos sus celdas publicadas devuelve la suma de
+sus celdas suprimidas, y con una sola suprimida la devuelve exacta. Es decir, el segundo
+eje de marginalización que el punto 3 de §2.2 y R4 dicen evitar, colado en la propia
+superficie que los invoca. La cobertura de campaña es una necesidad **operativa** de quien
+gestiona la recogida, no un resultado de análisis: vive en la zona restringida y la lee
+`espazio_consolidacion`. De ahí se sigue una regla de separación de funciones que no es
+opcional: **`espazio_analisis` y `espazio_consolidacion` no pueden concederse al mismo
+principal**, porque juntos rehacen la diferencia.
 
 **La franja va siempre en la clave.** Fase 0 no publica ninguna marginal sobre franja, y
 por eso el único eje de marginalización de la superficie es `grupo_rol`, que es
@@ -402,6 +531,7 @@ CREATE INDEX ON anotacion.anotacion (campana_id, grupo_rol, franja);   -- celda 
 CREATE INDEX ON anotacion.anotacion (version_instrumento);
 CREATE INDEX ON anotacion.atribucion_anotacion (atribucion);           -- §6.3 covariación
 CREATE INDEX ON anotacion.zona_recinto (recinto_id, validez_desde);
+CREATE INDEX ON anotacion.celda_recuento (campana_id, zona_id);
 CREATE INDEX ON captura.anotacion_borrador (sesion_id);
 CREATE INDEX ON captura.sesion (campana_id) WHERE cerrada_en IS NOT NULL;
 ```
@@ -409,7 +539,7 @@ CREATE INDEX ON captura.sesion (campana_id) WHERE cerrada_en IS NOT NULL;
 La restricción `EXCLUDE` de `zona_recinto` crea su propio índice GiST y exige
 `btree_gist`.
 
-### 2.7 Contrato con el esquema núcleo
+### 2.8 Contrato con el esquema núcleo
 
 Esta capa **no** define el núcleo IMDF, pero depende de él. El núcleo tendrá que ofrecer:
 
@@ -471,8 +601,28 @@ proximidad temporal y anula el severamiento del identificador.
 **Guardar el departamento.** §7 y §9.4. La protección es **no recogerlo**: una columna
 que no existe no se puede desanonimizar ni filtrar. `4.126` identifica a una persona.
 
-**Consolidar sesión a sesión.** Devuelve la agrupación por autor a través de
-`consolidada_en`.
+**Consolidar sesión a sesión.** Devuelve la agrupación por autor a través del lote.
+
+**Publicar el desglose por las ocho etiquetas.** Con `n` al lado son recuentos exactos, y
+con `n = 5` un recuento de 1 es una persona. Los ejes de valencia y activación publican lo
+que §6.2 necesita —el signo y el nivel de activación— sin publicar la distribución.
+
+**Publicar `cobertura_campana` con supresión coordinada.** Se podría, resolviendo la
+supresión sobre el retículo completo de agregaciones. Es trabajo de fase 1 como mínimo, y
+meterlo en fase 0 para una cifra operativa que no es un resultado de análisis es cambiar
+riesgo por comodidad. Fuera de la superficie publicada.
+
+**Conservar `consolidada_en` como fecha.** Restauraría por la puerta de atrás la
+resolución diaria que `semana_iso` acaba de quitar. Si el lote no puede etiquetar la fila,
+tampoco puede hacerlo su fecha.
+
+**Contar el umbral sobre anotaciones y no sobre sesiones.** Una persona que anota cinco
+espacios de una zona produce una celda de cinco que es una sola respondente. La letra de
+§7 dice anotaciones; contar sesiones es más estricto, así que la cumple.
+
+**El índice de Rand ajustado como prueba de no reconstitución.** Mide el caso medio y
+esconde justo el caso que importa: un grupo formado por una única sesión queda diluido en
+una media que sale buena. La prueba es de peor caso (criterio A6).
 
 **Vocabulario sin versionar.** Convierte la regla 6 de CLAUDE.md en una nota de
 documentación. Versionado, mezclar cohortes exige un acto explícito.
@@ -481,79 +631,112 @@ documentación. Versionado, mezclar cohortes exige un acto explícito.
 
 Todos sobre datos sintéticos. Ninguno requiere datos reales de anotación.
 
-### Privilegios
-1. Como `espazio_analisis`, `SELECT` sobre `anotacion.anotacion`, `captura.sesion` y
-   `cualitativo.nota` falla con `42501 insufficient_privilege`.
-2. Como `espazio_captura`, `INSERT` en `captura.anotacion_borrador` tiene éxito y
-   `SELECT` sobre `anotacion.anotacion` falla con `42501`.
-3. Como `espazio_analisis`, `SELECT` sobre cada vista de `analisis` tiene éxito.
-4. Ninguna vista de `analisis` depende de `cualitativo` (consulta sobre `pg_depend`
-   devuelve conjunto vacío).
-5. Ninguna vista de `analisis` expone una columna `recinto_id` o `arista_id`
-   (`information_schema.columns`).
+Los criterios llevan identificador estable en vez de número correlativo, para que añadir
+uno no rompa las referencias del resto del documento. Equivalencias con la revisión
+anterior: **V1** era el criterio 28, **A6** sustituye al 18 y **U8** era el 11.
 
-### Umbral
-6. Con 4 anotaciones sintéticas en `(campaña, zona, grupo_rol, franja)`,
-   `analisis.perfil_zona_rol` devuelve 0 filas para esa celda. Con la quinta, devuelve 1.
-7. `instrumento.umbral_k()` es `IMMUTABLE` y devuelve 5.
-8. No existe ninguna columna en ninguna tabla cuyo valor determine el umbral: el valor 5
-   aparece solo en definiciones de función y de vista (`pg_proc`, `pg_views`), nunca como
-   dato.
-9. Supresión complementaria, celdas `{38, 2}` en el mismo desglose: no se publica la
-   celda de 2, no se publica la de 38 y sí se publica el total 40.
-10. Supresión complementaria, celdas `{38, 2, 3}`: se publica la de 38 y el total 43; no
-    se publica ninguna de las dos suprimidas.
-11. Para todo par (vista, celda) de la superficie publicada, `n ≥ 5`. Test exhaustivo
-    sobre un escenario sintético generado con semilla fija.
+### Privilegios (P)
 
-### No agrupabilidad por autor
-12. Tras `consolidacion.consolidar(campana)`, ninguna columna de `anotacion.*` ni de
-    `cualitativo.*` contiene ningún valor presente en los `captura.sesion.id` emitidos.
-13. `captura.sesion` y `captura.anotacion_borrador` quedan vacías para esa campaña.
-14. `anotacion.anotacion` no tiene columna `serial`, `identity` ni de tipo timestamp con
-    resolución menor que día (`information_schema.columns`); su PK se genera con
-    `gen_random_uuid()`.
-15. Todas las filas consolidadas en un mismo lote comparten `consolidada_en`.
-16. `captura.token` no tiene FK ni columna que referencie `captura.sesion`
-    (`information_schema.table_constraints`).
-17. Un lote de consolidación con menos de 5 sesiones pendientes y la ventana de recogida
-    abierta no consolida nada.
-18. Reconstitución: sobre un escenario sintético de 30 sesiones con semilla fija, el
-    agrupamiento por `(campana_id, venue_id, grupo_rol, semana_iso, franja)` —la partición
-    más fina que permite el dato consolidado— recupera las sesiones de origen con un
-    índice de Rand ajustado inferior a 0,2 frente a la partición verdadera, que el test
-    conoce porque generó los datos.
+- **P1.** Como `espazio_analisis`, `SELECT` sobre `anotacion.anotacion`,
+  `anotacion.celda_recuento`, `captura.sesion` y `cualitativo.nota` falla con
+  `42501 insufficient_privilege`.
+- **P2.** Como `espazio_captura`, `INSERT` en `captura.anotacion_borrador` tiene éxito y
+  `SELECT` sobre `anotacion.anotacion` falla con `42501`.
+- **P3.** Como `espazio_analisis`, `SELECT` sobre cada vista de `analisis` tiene éxito.
+- **P4.** Ninguna vista de `analisis` depende de `cualitativo` (`pg_depend` devuelve
+  conjunto vacío).
+- **P5.** Ninguna vista de `analisis` expone columna `recinto_id` ni `arista_id`.
+- **P6.** Ninguna vista de `analisis` expone la etiqueta afectiva ni recuento alguno por
+  etiqueta: no hay columna cuyo nombre o dependencia remita a
+  `instrumento.etiqueta_afectiva` (`information_schema.columns` + `pg_depend`).
+- **P7.** Ningún principal es miembro simultáneo de `espazio_analisis` y
+  `espazio_consolidacion` (`pg_auth_members`, recursivo).
 
-### Instrumento
-19. `INSERT` de una anotación cuya etiqueta no pertenece a la versión de instrumento de
-    su campaña falla por FK.
-20. `UPDATE anotacion.campana SET version_instrumento = …` sobre una campaña con
-    anotaciones falla por `ON UPDATE RESTRICT`.
-21. `instrumento.version` no pasa a `'validado'` si falta cualquier traducción es/eu de
-    cualquier etiqueta, atribución o franja.
-22. `intensidad` fuera de `{1,2,3}` falla por `CHECK`.
-23. `num_nonnulls(recinto_id, arista_id) = 1`: falla con ambos nulos y con ambos no
-    nulos.
-24. `captura.sesion.permutacion_etiquetas` es una permutación completa de las etiquetas
-    de su versión, y sobre 200 sesiones sintéticas ninguna etiqueta ocupa la primera
-    posición significativamente más que las demás.
+### Umbral (U)
 
-### Encargo y zona
-25. `INSERT` en `captura.sesion` con campaña fuera de su ventana de recogida falla
-    (trigger).
-26. Una campaña con `recogida_hasta` posterior a `encargo_vigencia_hasta` falla por
-    `CHECK`.
-27. Un recinto en dos zonas con intervalos de validez solapados falla por `EXCLUDE`.
+- **U1.** Con 4 anotaciones de 4 sesiones distintas en `(campaña, zona, grupo_rol,
+  franja)`, `analisis.perfil_zona_rol` devuelve 0 filas para esa celda. Con la quinta,
+  procedente de una quinta sesión, devuelve 1.
+- **U2.** Con 5 anotaciones procedentes de solo 4 sesiones, devuelve 0 filas.
+- **U3.** Con 8 anotaciones procedentes de 2 sesiones, devuelve 0 filas.
+- **U4.** `instrumento.umbral_k()` es `IMMUTABLE` y devuelve 5.
+- **U5.** El umbral no es dato: el valor aparece en `pg_proc` y `pg_views`, y en ninguna
+  columna de ninguna tabla.
+- **U6.** Supresión complementaria con celdas `{38, 2}`: no se publica la de 2, no se
+  publica la de 38, y sí se publica el total 40.
+- **U7.** Supresión complementaria con celdas `{38, 2, 3}`: se publica la de 38 y el total
+  43; no se publica ninguna de las dos suprimidas.
+- **U8.** Para todo par (vista, celda) de la superficie publicada, `n_anotaciones ≥ 5`
+  **y** `n_sesiones ≥ 5`. Exhaustivo sobre un escenario sintético con semilla fija.
+- **U9.** Toda vista de `analisis` lleva `zona_id` y `franja` entre sus columnas de
+  agrupación: no existe ninguna que marginalice sobre el eje espacial ni sobre el
+  temporal. Es lo que mantiene en un solo eje la marginalización que cubre §2.2.
 
-### Viabilidad
-28. `datos_sinteticos/` incluye un script determinista con semilla que, dados número de
-    participantes, anotaciones por sesión, zonas y grupos de rol, informa la fracción de
-    celdas `(zona × grupo_rol × franja)` que supera k=5. **Debe ejecutarse antes de
-    diseñar la campaña real**, no después.
+### No agrupabilidad por autor (A)
+
+- **A1.** Tras consolidar, ninguna columna de `anotacion.*` ni de `cualitativo.*` contiene
+  ningún valor presente en los `captura.sesion.id` emitidos.
+- **A2.** Cerrada la ventana de recogida y ejecutada la consolidación final,
+  `captura.sesion` y `captura.anotacion_borrador` quedan vacías para esa campaña.
+- **A3.** `anotacion.anotacion` no tiene columna `serial` ni `identity`, ni columna de
+  tipo `timestamp`/`timestamptz`, ni columna de fecha con resolución menor que
+  `semana_iso`. Su PK se genera con `gen_random_uuid()`.
+- **A4.** No existe columna `consolidada_en` ni ninguna otra etiqueta de lote en
+  `anotacion.anotacion`, y no existe FK ni columna que relacione
+  `anotacion.lote_consolidacion` con filas individuales.
+- **A5.** `captura.token` no tiene FK ni columna que referencie `captura.sesion`.
+- **A6.** **Peor caso, no caso medio.** Sobre un escenario sintético con semilla fija y
+  verdad conocida por el generador, **ningún** grupo `(campana_id, venue_id, grupo_rol,
+  semana_iso, franja)` presente en `anotacion.anotacion` procede de una sola sesión.
+- **A7.** `anotacion.posicion_etiqueta` coincide con el índice de la etiqueta elegida
+  dentro de la permutación que se mostró en esa sesión. *(Si se resuelve §2.6 por la
+  segunda salida, este criterio pasa a comprobar `en_primera_posicion`.)*
+- **A8.** Un lote con menos de 5 sesiones pendientes y la ventana de recogida abierta no
+  consolida nada; las anotaciones retenidas siguen en `captura` y las descartadas al
+  cierre quedan contadas en `anotacion.lote_consolidacion.n_descartadas`.
+
+### Instrumento (I)
+
+- **I1.** `INSERT` de una anotación cuya etiqueta no pertenece a la versión de instrumento
+  de su campaña falla por FK.
+- **I2.** `UPDATE anotacion.campana SET version_instrumento = …` sobre una campaña con
+  anotaciones falla por `ON UPDATE RESTRICT`.
+- **I3.** `instrumento.version` no pasa a `'validado'` si falta cualquier traducción es/eu
+  de cualquier etiqueta, atribución o franja.
+- **I4.** `intensidad` fuera de `{1,2,3}` falla por `CHECK`.
+- **I5.** `num_nonnulls(recinto_id, arista_id) = 1`: falla con ambos nulos y con ambos no
+  nulos.
+- **I6.** `captura.sesion.permutacion_etiquetas` es una permutación completa de las
+  etiquetas de su versión, y sobre 200 sesiones sintéticas ninguna etiqueta ocupa la
+  primera posición significativamente más que las demás.
+- **I7.** Dentro de una misma sesión, una segunda anotación sobre el mismo recinto con la
+  misma `elicitacion` falla por `UNIQUE`; con `elicitacion` distinta —`cierre_positivo`
+  frente a `espontanea`— tiene éxito. Es la respuesta que §5.5 va a buscar al cerrar.
+
+### Encargo y zona (Z)
+
+- **Z1.** `INSERT` en `captura.sesion` con campaña fuera de su ventana de recogida falla.
+- **Z2.** Una campaña con `recogida_hasta` posterior a `encargo_vigencia_hasta` falla por
+  `CHECK`.
+- **Z3.** Un recinto en dos zonas con intervalos de validez solapados falla por `EXCLUDE`.
+- **Z4.** **Cobertura.** No se puede abrir la recogida de una campaña si algún recinto o
+  alguna arista del venue queda fuera de toda zona en algún instante de la ventana.
+- **Z5.** **Congelación.** Cualquier `INSERT`/`UPDATE`/`DELETE` sobre `anotacion.zona`,
+  `zona_recinto` o `zona_arista` cuya validez solape la ventana de recogida de una campaña
+  abierta falla.
+- **Z6.** `INSERT` en `captura.anotacion_borrador` sobre una entidad que no pertenece a
+  ninguna zona vigente en ese momento falla.
+
+### Viabilidad (V)
+
+- **V1.** `datos_sinteticos/` incluye un script determinista con semilla que, dados número
+  de participantes, anotaciones por sesión, zonas y grupos de rol, informa la fracción de
+  celdas `(zona × grupo_rol × franja)` que supera k=5. **Debe ejecutarse antes de diseñar
+  la campaña real**, no después.
 
 ## 5. Qué queda explícitamente fuera
 
-- El **esquema núcleo IMDF**. Aquí solo se declara el contrato de §2.7.
+- El **esquema núcleo IMDF**. Aquí solo se declara el contrato de §2.8.
 - El **motor de divergencia**, la matriz de desacople y la capa de traducción (§6, §6.1).
   Fase 1. Fase 0 publica perfiles y cobertura, y nada más.
 - La **regla de §6.1** («nunca un número solo»). Fase 0 no emite métricas; cuando las
@@ -569,6 +752,13 @@ Todos sobre datos sintéticos. Ninguno requiere datos reales de anotación.
 - **Horas de corte de las franjas**: propuesta de partida `manana` 07–12, `mediodia`
   12–15, `tarde` 15–19, `noche` 19–23, pendiente de confirmación. Cambiarlas después de
   recoger rompe la comparabilidad igual que cambiar el vocabulario.
+- **`cobertura_campana` como vista publicada.** Sale de `analisis` y queda en la zona
+  restringida como cifra operativa.
+- **La dispersión dentro de la celda** y el desglose por etiqueta en la superficie
+  publicada. Se almacenan; no se publican.
+- **La posición mostrada de las atribuciones.** Solo se arrastra la de la etiqueta
+  afectiva. En una multiselección el efecto de posición es otra pregunta, y no está
+  planteada.
 - **El generador de datos sintéticos** en sí. Su especificación es otra decisión.
 - **La interfaz de captura.** Aquí solo se fija qué queda registrado.
 
@@ -577,7 +767,7 @@ Todos sobre datos sintéticos. Ninguno requiere datos reales de anotación.
 **R1 — Que k=5 silencie el instrumento.** Si la n real deja la mayoría de celdas
 `(zona × grupo_rol × franja)` por debajo de 5, se recoge y no se publica. No hay parche
 técnico: bajar el umbral está prohibido y subir la n es trabajo de campo. **Mitigación:
-criterio 28, ejecutado antes de diseñar la campaña.** Coste de detectarlo tarde: una
+criterio 28 —ahora V1—, ejecutado antes de diseñar la campaña.** Coste de detectarlo tarde: una
 campaña entera y el encargo institucional gastado.
 
 **R2 — `indiferente` codificada como valencia negativa es contestable.** §5.2 la lista
@@ -597,8 +787,10 @@ temporal, que §5.5 considera probablemente el hallazgo más accionable.
 nueva a `analisis` sin revisarla contra las existentes reabre el ataque por diferencia.
 El caso concreto que hay que vigilar es una **marginal sobre franja**: introduciría un
 segundo eje de marginalización y la regla de §2.2, escrita para uno solo, dejaría de
-cubrir la superficie. Es la parte del diseño que se degrada con el uso, y por eso el
-criterio 11 debe re-ejecutarse en cada migración que toque `analisis`.
+cubrir la superficie. Ya ocurrió una vez: `cobertura_campana` era exactamente eso, y
+estaba dentro de la superficie que invoca esta regla. Es la parte del diseño que se
+degrada con el uso, y por eso los criterios U8 y U9 deben re-ejecutarse en cada migración
+que toque `analisis`.
 
 **R5 — El severamiento del identificador de sesión es irreversible por diseño.** Si en un
 año resulta que hacía falta agrupar por autor, los datos ya consolidados no lo permitirán
@@ -615,7 +807,30 @@ de análisis y el olvido, que es de donde vienen estas fugas en la práctica.
 versiones en lugar de a identidades estables, esta capa se rompe entera. Coste de
 reversión: alto, y crece con cada anotación recogida.
 
-**R8 — Coste de reversión global.** Antes de recoger la primera anotación real: barato,
+**R9 — El umbral sobre sesiones estrecha aún más lo publicable, y agrava R1.** Exigir
+cinco personas en vez de cinco anotaciones es lo correcto y reduce el número de celdas que
+superan el corte respecto a lo estimado con la regla anterior. V1 debe ejecutarse con el
+doble umbral, no con el de anotaciones, o dará una viabilidad que no existe.
+
+**R10 — El descarte de grupos unitarios cae donde más duele.** Las anotaciones que se
+descartan al cierre por venir de una sesión sola son, por construcción, las de los roles
+con menos participación: conserjería, limpieza, mantenimiento. Es §8 otra vez, esta vez
+amplificado por el propio mecanismo de protección. Por eso `n_descartadas` se registra y
+hay que mirarlo: si es alto en un rol, el resultado dirá «el edificio» y significará
+«quienes tienen despacho», y ninguna cifra publicada lo delatará.
+
+**R11 — Sin etiqueta de lote por fila no hay remediación selectiva.** Si aparece un error
+de consolidación, no habrá forma de saber qué filas vinieron del lote defectuoso: habrá
+que revisar la campaña entera o descartarla. Es el precio de quitar `consolidada_en` y se
+paga a sabiendas.
+
+**R12 — `posicion_etiqueta` es una huella si §5.2 no cambia.** Con aleatorización por
+sesión, la aplicación etiqueta → posición es constante dentro de la sesión y permite
+agruparla. La decisión de §2.6 está abierta y **bloquea la implementación de esa
+columna**: implementar el ordinal manteniendo la aleatorización por sesión reabre la vía
+que §2.3 cierra.
+
+**R13 — Coste de reversión global.** Antes de recoger la primera anotación real: barato,
 son migraciones sobre tablas vacías. Después: el vocabulario, la escala de intensidad, el
 modo de anclaje y las franjas invalidan la cohorte; la estructura de zonas y la gramática
 de celdas se pueden cambiar sin perder dato.
