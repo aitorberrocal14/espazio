@@ -9,7 +9,7 @@ y se modifica aquí antes de tocar código.
 
 Autor: Aitor Berrocal Lorda
 Estado: fase 0 (núcleo)
-Última revisión: pendiente de primer commit
+Última revisión: 2026-09-03 — §5.2, orden de presentación
 
 ---
 
@@ -151,8 +151,15 @@ circumplejo de Russell). El usuario elige una palabra; el sistema guarda dos eje
 Intensidad de **tres** niveles, no de siete. Con la n prevista, más precisión es falsa.
 
 Requisitos:
-- El orden de presentación **se aleatoriza** en cada sesión: el primer elemento de una
-  lista se elige desproporcionadamente.
+- El orden de presentación **se aleatoriza en cada anotación**, no una vez por sesión: el
+  primer elemento de una lista se elige desproporcionadamente. Aleatorizar por anotación
+  promedia el sesgo de presentación en lugar de fijarlo durante toda la sesión, y evita
+  además que la correspondencia etiqueta → posición, constante dentro de una sesión, sirva
+  para reagrupar las anotaciones de una misma persona después de anonimizarlas. La
+  posición en que se mostró la etiqueta elegida se guarda con la anotación, para poder
+  controlar el efecto de posición en el análisis.
+  *(Revisado el 2026-09-03; motivo y alternativa descartada en
+  `decisiones/2026-09-03-esquema-capa-anotacion.md` §2.6.)*
 - El vocabulario **se valida antes** con cinco o seis personas de perfiles distintos. Si
   «estimulante» no significa lo mismo para conserjería que para dirección, la métrica
   está rota en el origen.

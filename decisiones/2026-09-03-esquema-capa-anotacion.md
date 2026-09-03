@@ -144,10 +144,11 @@ de atrás.
 semana_iso, franja)`, consolidarla deja en la zona restringida un grupo que **es** esa
 sesión, íntegra. Esas anotaciones se **retienen** en `captura` hasta que otra sesión entre
 en su grupo; si al cerrar la campaña siguen solas, **no se consolidan y se descartan**, y
-el número de descartes queda registrado en `anotacion.lote_consolidacion`. Se cuenta
-porque el descarte no es neutral: cae sobre los roles con menos participación, que son
-justo los que §8 dice que ya están infrarrepresentados. Es pérdida de dato, es visible, y
-es preferible a conservar una sesión reconstruible.
+el descarte queda registrado **por grupo de rol** en `anotacion.descarte`. Se registra así
+y no como total porque el descarte no es neutral: cae sobre los roles con menos
+participación, que son justo los que §8 identifica como estructuralmente
+infrarrepresentados. Es pérdida de dato, es visible, va al informe, y es preferible a
+conservar una sesión reconstruible.
 
 ### 2.4 La campaña hace del encargo institucional una restricción
 
@@ -177,39 +178,37 @@ ser una advertencia en un documento y pasa a ser estructura:
 Consecuencia deliberada: mezclar versiones en un análisis exige un acto explícito. No
 puede ocurrir por descuido.
 
-### 2.6 La posición mostrada viaja con la anotación, y eso obliga a decidir sobre §5.2
+### 2.6 La posición mostrada viaja con la anotación, y §5.2 cambia con ella
 
-`permutacion_etiquetas` vive en `captura.sesion`, que se destruye al consolidar. Sin
-arrastrar nada, después de consolidar no queda forma de controlar el efecto de posición y
-la columna no sirve para lo que la justificaba. La anotación consolidada lleva por eso
-`posicion_etiqueta`: el índice, base 1, en el que apareció la etiqueta elegida dentro de
-la lista que se mostró a esa persona.
+La anotación consolidada lleva `posicion_etiqueta`: el índice, base 1, en el que apareció
+la etiqueta elegida dentro de la lista que se mostró. Sin arrastrarlo, `permutacion_*` se
+destruye con la sesión y el control del efecto de posición se vuelve imposible después de
+consolidar.
 
-**Esto arrastra un coste que hay que resolver antes de implementar.** Si el orden se
-aleatoriza **una vez por sesión**, como dice §5.2 literalmente, las anotaciones de una
-misma sesión comparten una única aplicación etiqueta → posición, y esa aplicación parcial
-es una huella: dentro de un grupo `(campana, venue, grupo_rol, semana_iso, franja)` se
-pueden agrupar por consistencia de esa aplicación y reconstruir sesiones. Es exactamente
-lo que §2.3 existe para impedir.
+Ese ordinal solo es seguro si el orden se aleatoriza **por anotación**. Con la
+aleatorización por sesión que decía §5.2 en su redacción original, todas las anotaciones
+de una sesión comparten una única correspondencia etiqueta → posición, y esa aplicación
+parcial es una huella: dentro de un grupo `(campana, venue, grupo_rol, semana_iso,
+franja)` se pueden agrupar por consistencia de esa correspondencia y reconstruir sesiones,
+que es exactamente lo que §2.3 existe para impedir.
 
-Dos salidas, y hay que elegir una:
+**Decidido y aprobado el 2026-09-03: se aleatoriza en cada anotación.** `PROYECTO.md` §5.2
+queda modificado en consecuencia, antes de escribir código, como exige su propio
+preámbulo. El cambio no invalida datos porque todavía no hay ninguno; después de la
+primera campaña sí los invalidaría. Metodológicamente además es preferible: promedia el
+sesgo de presentación en lugar de fijarlo durante toda la sesión.
 
-- **Aleatorizar por anotación en lugar de por sesión** (recomendada). La posición queda
-  independiente entre anotaciones de una misma sesión, la huella desaparece y se conserva
-  el ordinal completo para modelar el efecto de posición. **Es un cambio a §5.2 y cae bajo
-  la regla 6 de CLAUDE.md: necesita tu aprobación explícita antes de implementarse.** No
-  invalida datos ya recogidos porque todavía no hay ninguno; después de la primera campaña
-  sí los invalidaría.
-- **Mantener la aleatorización por sesión** y degradar el campo a
-  `en_primera_posicion boolean`. Un bit por anotación agrupa mucho peor, y captura la
-  preocupación que §5.2 enuncia de verdad —«el primer elemento de una lista se elige
-  desproporcionadamente»—, a cambio de perder el ordinal.
+Queda descartada la alternativa de degradar el campo a `en_primera_posicion boolean`
+manteniendo la aleatorización por sesión.
 
-El esbozo de §2.7 escribe la primera. Si eliges la segunda, cambian el tipo de la columna
-y el criterio A7.
+**Consecuencia sobre el esquema:** si el orden se sortea por anotación, `permutacion_etiquetas`
+y `permutacion_atribuciones` **dejan de ser campos de sesión** y bajan a
+`captura.anotacion_borrador`. Lo que sobrevive a la consolidación sigue siendo solo el
+ordinal de la etiqueta elegida.
 
-La posición de las **atribuciones** no se arrastra: no lo pediste y en una multiselección
-el efecto de posición es otra pregunta. Queda anotado como pendiente en §5.
+La posición de las **atribuciones** se registra durante la captura pero no se arrastra a la
+anotación consolidada: en una multiselección el efecto de posición es otra pregunta y no
+está planteada. Queda anotada como pendiente en §5.
 
 ### 2.7 Esbozo del esquema
 
@@ -391,10 +390,24 @@ CREATE TABLE anotacion.lote_consolidacion (          -- auditoría sin etiqueta 
   campana_id     uuid NOT NULL REFERENCES anotacion.campana(id),
   momento        timestamptz NOT NULL DEFAULT now(),
   n_sesiones     integer NOT NULL,
-  n_anotaciones  integer NOT NULL,
-  n_descartadas  integer NOT NULL                    -- grupos unitarios al cierre, §2.3
+  n_anotaciones  integer NOT NULL
 );
 -- No existe FK desde anotacion.anotacion hacia aquí: sería la etiqueta de lote otra vez.
+
+CREATE TABLE anotacion.descarte (                    -- §2.3 y R10: quién se queda fuera
+  lote_id        uuid    NOT NULL REFERENCES anotacion.lote_consolidacion(id),
+  campana_id     uuid    NOT NULL REFERENCES anotacion.campana(id),
+  venue_id       uuid    NOT NULL,
+  grupo_rol      text    NOT NULL,
+  n_sesiones     integer NOT NULL CHECK (n_sesiones    > 0),
+  n_anotaciones  integer NOT NULL CHECK (n_anotaciones > 0),
+  PRIMARY KEY (lote_id, grupo_rol),
+  FOREIGN KEY (venue_id, grupo_rol) REFERENCES anotacion.grupo_rol (venue_id, codigo)
+);
+-- El descarte se registra POR GRUPO DE ROL, no como total. Que se hayan descartado cuatro
+-- sesiones de limpieza y ninguna de PDI es un resultado, no una nota de auditoría: el
+-- sesgo no es aleatorio. Vive en la zona restringida; llevarlo a un informe es una
+-- decisión humana, no una publicación automática.
 
 CREATE TABLE anotacion.atribucion_anotacion (        -- §5.1 paso 3, multiselección
   anotacion_id         uuid     NOT NULL,
@@ -426,8 +439,6 @@ CREATE TABLE captura.sesion (
   grupo_rol                 text NOT NULL,
   modo                      text NOT NULL CHECK (modo IN ('in_situ','retrospectivo')),
   lengua                    text NOT NULL CHECK (lengua IN ('es','eu')),
-  permutacion_etiquetas     text[] NOT NULL,         -- §5.2: orden realmente mostrado
-  permutacion_atribuciones  text[] NOT NULL,
   abierta_en                timestamptz NOT NULL DEFAULT now(),
   cerrada_en                timestamptz,
   FOREIGN KEY (venue_id, grupo_rol) REFERENCES anotacion.grupo_rol (venue_id, codigo)
@@ -443,6 +454,8 @@ CREATE TABLE captura.anotacion_borrador (
   elicitacion  text     NOT NULL
                CHECK (elicitacion IN ('espontanea','cierre_positivo')),
   momento      timestamptz NOT NULL DEFAULT now(),   -- exacto aquí, y solo aquí
+  permutacion_etiquetas     text[] NOT NULL,          -- §5.2: se sortea POR ANOTACIÓN
+  permutacion_atribuciones  text[] NOT NULL,
   CHECK (num_nonnulls(recinto_id, arista_id) = 1),
   UNIQUE (sesion_id, recinto_id, elicitacion),       -- NULLS DISTINCT: no colisionan
   UNIQUE (sesion_id, arista_id, elicitacion)
@@ -450,10 +463,11 @@ CREATE TABLE captura.anotacion_borrador (
 -- captura.atribucion_borrador y captura.nota_borrador: análogas, ON DELETE CASCADE.
 ```
 
-`permutacion_etiquetas` guarda el orden que se mostró de verdad. §5.2 exige aleatorizar
-porque el primer elemento se elige desproporcionadamente; guardar la permutación es lo
-único que permite **comprobar** que la aleatorización ocurrió. Lo que sobrevive a la
-consolidación es `anotacion.posicion_etiqueta`, con la decisión pendiente de §2.6.
+`permutacion_etiquetas` guarda el orden que se mostró de verdad, y vive en el borrador
+porque el sorteo es por anotación (§2.6). §5.2 exige aleatorizar porque el primer elemento
+se elige desproporcionadamente; guardar la permutación es lo único que permite
+**comprobar** que la aleatorización ocurrió. Lo que sobrevive a la consolidación es
+`anotacion.posicion_etiqueta`.
 
 La unicidad incluye `elicitacion` a propósito: §5.5 cierra la sesión preguntando «¿hay
 algún sitio donde estés a gusto?», y la persona puede perfectamente nombrar un espacio que
@@ -689,11 +703,14 @@ anterior: **V1** era el criterio 28, **A6** sustituye al 18 y **U8** era el 11.
   verdad conocida por el generador, **ningún** grupo `(campana_id, venue_id, grupo_rol,
   semana_iso, franja)` presente en `anotacion.anotacion` procede de una sola sesión.
 - **A7.** `anotacion.posicion_etiqueta` coincide con el índice de la etiqueta elegida
-  dentro de la permutación que se mostró en esa sesión. *(Si se resuelve §2.6 por la
-  segunda salida, este criterio pasa a comprobar `en_primera_posicion`.)*
+  dentro de `captura.anotacion_borrador.permutacion_etiquetas` de **esa anotación**.
+  `captura.sesion` no tiene columna de permutación: el sorteo es por anotación (§2.6).
 - **A8.** Un lote con menos de 5 sesiones pendientes y la ventana de recogida abierta no
-  consolida nada; las anotaciones retenidas siguen en `captura` y las descartadas al
-  cierre quedan contadas en `anotacion.lote_consolidacion.n_descartadas`.
+  consolida nada, y las anotaciones retenidas siguen en `captura`.
+- **A9.** Las descartadas al cierre quedan en `anotacion.descarte` **desglosadas por grupo
+  de rol**: un escenario sintético con 4 sesiones unitarias de `limpieza` y ninguna de
+  `pdi` produce una fila para `limpieza` con `n_sesiones = 4` y ninguna para `pdi`. La
+  suma de `anotacion.descarte` sobre un lote es el total descartado en ese lote.
 
 ### Instrumento (I)
 
@@ -706,9 +723,11 @@ anterior: **V1** era el criterio 28, **A6** sustituye al 18 y **U8** era el 11.
 - **I4.** `intensidad` fuera de `{1,2,3}` falla por `CHECK`.
 - **I5.** `num_nonnulls(recinto_id, arista_id) = 1`: falla con ambos nulos y con ambos no
   nulos.
-- **I6.** `captura.sesion.permutacion_etiquetas` es una permutación completa de las
-  etiquetas de su versión, y sobre 200 sesiones sintéticas ninguna etiqueta ocupa la
-  primera posición significativamente más que las demás.
+- **I6.** `captura.anotacion_borrador.permutacion_etiquetas` es una permutación completa
+  de las etiquetas de su versión, y sobre 200 **anotaciones** sintéticas ninguna etiqueta
+  ocupa la primera posición significativamente más que las demás. Dos anotaciones de una
+  misma sesión no comparten permutación más a menudo que dos de sesiones distintas: es lo
+  que impide que la posición sirva para reagrupar (§2.6).
 - **I7.** Dentro de una misma sesión, una segunda anotación sobre el mismo recinto con la
   misma `elicitacion` falla por `UNIQUE`; con `elicitacion` distinta —`cierre_positivo`
   frente a `espontanea`— tiene éxito. Es la respuesta que §5.5 va a buscar al cerrar.
@@ -756,9 +775,12 @@ anterior: **V1** era el criterio 28, **A6** sustituye al 18 y **U8** era el 11.
   restringida como cifra operativa.
 - **La dispersión dentro de la celda** y el desglose por etiqueta en la superficie
   publicada. Se almacenan; no se publican.
-- **La posición mostrada de las atribuciones.** Solo se arrastra la de la etiqueta
-  afectiva. En una multiselección el efecto de posición es otra pregunta, y no está
-  planteada.
+- **La posición mostrada de las atribuciones.** Se registra durante la captura pero no se
+  arrastra a la anotación consolidada. En una multiselección el efecto de posición es otra
+  pregunta, y no está planteada.
+- **La entrevista para roles poco poblados.** Apuntada como mitigación de R10 y como la
+  única vía realista para los grupos que R9 deja permanentemente por debajo del umbral. Es
+  material cualitativo, no capa de anotación, y diseñarla es otra decisión.
 - **El generador de datos sintéticos** en sí. Su especificación es otra decisión.
 - **La interfaz de captura.** Aquí solo se fija qué queda registrado.
 
@@ -807,28 +829,65 @@ de análisis y el olvido, que es de donde vienen estas fugas en la práctica.
 versiones en lugar de a identidades estables, esta capa se rompe entera. Coste de
 reversión: alto, y crece con cada anotación recogida.
 
-**R9 — El umbral sobre sesiones estrecha aún más lo publicable, y agrava R1.** Exigir
-cinco personas en vez de cinco anotaciones es lo correcto y reduce el número de celdas que
-superan el corte respecto a lo estimado con la regla anterior. V1 debe ejecutarse con el
-doble umbral, no con el de anotaciones, o dará una viabilidad que no existe.
+**R9 — El doble umbral restringe cuántas zonas y cuántas franjas puede tener el diseño.**
+No es solo que estreche lo publicable: fija un techo aritmético que ninguna decisión de
+esquema mueve, y conviene saberlo antes de ejecutar V1 y no después.
 
-**R10 — El descarte de grupos unitarios cae donde más duele.** Las anotaciones que se
-descartan al cierre por venir de una sesión sola son, por construcción, las de los roles
-con menos participación: conserjería, limpieza, mantenimiento. Es §8 otra vez, esta vez
-amplificado por el propio mecanismo de protección. Por eso `n_descartadas` se registra y
-hay que mirarlo: si es alto en un rol, el resultado dirá «el edificio» y significará
-«quienes tienen despacho», y ninguna cifra publicada lo delatará.
+Exigir `n_sesiones ≥ 5` por `(zona × grupo_rol × franja)` significa que cada grupo de rol
+necesita **del orden de 15 a 20 respondentes activos por zona** para publicar: con cuatro
+franjas y reparto uniforme harían falta 20, y con el reparto real —la gente anota en una o
+dos franjas, no en las cuatro— siguen haciendo falta 15 para que publiquen más de una.
+
+De ahí sale el techo. Con `P` respondentes activos de un grupo de rol, cada uno anotando
+`z` zonas distintas, `Z` zonas y `F` franjas:
+
+> `Z ≤ P · z / (5F)`
+
+Con `P = 60`, `z = 5` y `F = 4`: **como mucho 15 zonas**. Con un grupo poco poblado,
+`P = 12`: **tres zonas**, y eso suponiendo reparto uniforme, que no ocurre.
+
+Y aquí está lo que de verdad muerde: **la divergencia entre roles de §6.1 exige que pasen
+el umbral los dos perfiles que se comparan**, así que quien manda no es el grupo grande
+sino el pequeño. El hallazgo del proyecto —dónde el mismo espacio significa cosas
+distintas según quién lo habita— es precisamente el que primero se queda sin publicar.
+
+Consecuencias prácticas, todas anteriores a la recogida: `Z` y `F` son variables de diseño
+y hay que fijarlas contra `P`, no al revés; reducir de cuatro franjas a dos casi duplica
+el techo de zonas; y agrupar zonas más gruesas compra publicabilidad a costa de
+resolución espacial. Ninguna de las tres se puede corregir después, porque `F` está
+versionada con el instrumento y `Z` queda congelada durante la recogida (Z5).
+
+V1 debe ejecutarse con el doble umbral, no con el de anotaciones, o dará una viabilidad
+que no existe.
+
+**R10 — El descarte de grupos unitarios cae donde más duele, y por eso se registra con
+nombre.** Las anotaciones que se descartan al cierre por venir de una sesión sola son, por
+construcción, las de los roles con menos participación: conserjería, limpieza,
+mantenimiento. Es §8 otra vez, amplificado por el propio mecanismo de protección.
+
+El sesgo **no es aleatorio**, así que un recuento total no sirve: `anotacion.descarte`
+guarda el grupo de rol de cada descarte. Que se hayan descartado cuatro sesiones de
+limpieza y ninguna de PDI es un resultado que va al informe, junto al análisis y con el
+mismo peso, no una nota de auditoría. Sin él, el resultado dirá «el edificio» y
+significará «quienes tienen despacho», y ninguna cifra publicada lo delatará.
+
+**Mitigación apuntada, no diseñada:** para los roles poco poblados la vía no es la
+anotación agregada —que R9 demuestra que nunca alcanzará el umbral— sino la **entrevista**.
+Es material cualitativo, se lee y no se agrega, como la nota libre de §5.1. Queda como
+pendiente en §5; diseñarla es otra decisión y no toca ahora.
 
 **R11 — Sin etiqueta de lote por fila no hay remediación selectiva.** Si aparece un error
 de consolidación, no habrá forma de saber qué filas vinieron del lote defectuoso: habrá
 que revisar la campaña entera o descartarla. Es el precio de quitar `consolidada_en` y se
 paga a sabiendas.
 
-**R12 — `posicion_etiqueta` es una huella si §5.2 no cambia.** Con aleatorización por
-sesión, la aplicación etiqueta → posición es constante dentro de la sesión y permite
-agruparla. La decisión de §2.6 está abierta y **bloquea la implementación de esa
-columna**: implementar el ordinal manteniendo la aleatorización por sesión reabre la vía
-que §2.3 cierra.
+**R12 — `posicion_etiqueta` vuelve a ser una huella si alguien deshace §5.2.** Resuelto de
+raíz el 2026-09-03 al pasar la aleatorización a por anotación (§2.6), pero el riesgo
+sobrevive como dependencia: el ordinal es seguro **porque** el sorteo es por anotación. Si
+en algún momento se vuelve a sortear por sesión —por rendimiento, por simplificar el
+cliente, por copiar un formulario existente—, la correspondencia etiqueta → posición se
+vuelve constante dentro de la sesión y reabre la vía que §2.3 cierra, sin que ningún
+criterio del esquema falle. Lo vigila I6.
 
 **R13 — Coste de reversión global.** Antes de recoger la primera anotación real: barato,
 son migraciones sobre tablas vacías. Después: el vocabulario, la escala de intensidad, el
