@@ -43,6 +43,20 @@ CATALOGO: list[Mutacion] = [
         "grant select (id) on captura.anotacion_borrador to espazio_captura;",
         "tests/test_privilegios.py::test_p2_captura_no_puede_enumerar_borradores"),
     Mutacion(
+        "la API de escritura deja de comprobar el secreto de sesión",
+        "create or replace function captura.exige_sesion_autorizada(p_sesion uuid,"
+        " p_secreto text) returns void language plpgsql security definer"
+        " set search_path = pg_catalog, public as $$ begin return; end $$;",
+        "tests/test_privilegios.py::test_p8_el_id_de_sesion_no_basta_para_escribir_en_ella"),
+    Mutacion(
+        "espazio_captura recupera el INSERT directo y se salta la API",
+        "grant insert on captura.anotacion_borrador to espazio_captura;",
+        "tests/test_privilegios.py::test_p2_captura_escribe_solo_por_la_api"),
+    Mutacion(
+        "la franja deja de comprobarse al anotar",
+        "drop trigger exige_momento_en_franja on captura.anotacion_borrador;",
+        "tests/test_captura.py::test_z7_el_momento_fuera_de_rejilla_falla_al_anotar"),
+    Mutacion(
         "una vista publicada expone el recinto en vez de la zona",
         "create view analisis.fuga as select recinto_id, arista_id from anotacion.anotacion;",
         "tests/test_privilegios.py::test_p5_ninguna_vista_publicada_expone_la_entidad_anclada"),

@@ -61,7 +61,7 @@ en la aplicación. Cuatro esquemas Postgres y cinco roles.
 | rol | privilegios |
 |---|---|
 | `espazio_propietario` | dueño de todo. Solo migraciones. |
-| `espazio_captura` | INSERT/UPDATE en `captura.*`, SELECT en `instrumento.*`. **Sin SELECT sobre `anotacion.*`**: el formulario escribe y no puede leer lo escrito. |
+| `espazio_captura` | **EXECUTE sobre la API de escritura de `captura` y nada más**, más SELECT en `instrumento.*`. Ni un privilegio de tabla sobre `captura`: ni de lectura, ni de escritura, ni de columna. Ver §2.9. |
 | `espazio_consolidacion` | lee `captura`, escribe `anotacion` y `cualitativo`, borra `captura`. No lo usa ningún endpoint web. |
 | `espazio_analisis` | USAGE en `analisis` y SELECT en sus vistas. **Cero privilegios** sobre `captura`, `anotacion` y `cualitativo`. |
 | `espazio_cualitativo` | SELECT sobre `cualitativo.nota`. Se concede y se revoca por acto explícito, fuera del despliegue. |
@@ -439,10 +439,13 @@ CREATE TABLE captura.sesion (
   grupo_rol                 text NOT NULL,
   modo                      text NOT NULL CHECK (modo IN ('in_situ','retrospectivo')),
   lengua                    text NOT NULL CHECK (lengua IN ('es','eu')),
+  secreto_hash              bytea NOT NULL,          -- sha256 del secreto; ver §2.9
   abierta_en                timestamptz NOT NULL DEFAULT now(),
   cerrada_en                timestamptz,
   FOREIGN KEY (venue_id, grupo_rol) REFERENCES anotacion.grupo_rol (venue_id, codigo)
 );
+-- Se escribe y se cierra por la API de §2.9. El rol de captura no tiene privilegio de
+-- tabla sobre nada de este esquema.
 
 CREATE TABLE captura.anotacion_borrador (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -573,6 +576,41 @@ La capa de anotación es **extensión declarada sobre IMDF**, no parte de él: I
 concepto de anotación afectiva y su `unit` no admite estos atributos. Vive en esquemas
 propios y el export IMDF se produce sin ella, de modo que sigue siendo IMDF válido.
 
+### 2.9 La zona de captura se escribe por una API, no por privilegios de tabla
+
+La primera redacción daba a `espazio_captura` INSERT y UPDATE sobre `captura.*` y ningún
+SELECT, con la idea de que el formulario escribiera sin poder leer. Contra el motor, eso
+no se sostiene, y las tres salidas posibles con permisos de tabla se comprobaron una a
+una:
+
+| se concede | `INSERT ... RETURNING id` | `SELECT` desnudo |
+|---|---|---|
+| solo INSERT | falla: `permission denied` | falla |
+| INSERT + `SELECT (id)` | funciona | **enumera todos los borradores** |
+| INSERT + RLS `SELECT USING (false)` | falla | devuelve 0 filas |
+
+No hay combinación que dé las dos cosas, y enumerar borradores no es inocuo: sin leer una
+sola anotación revela **la cadencia de recogida** —cuántas personas están anotando y
+cuándo—, que en un edificio con roles poco poblados vuelve a señalar a los mismos.
+
+Así que la operación se mete dentro de la frontera. `captura` se escribe por tres
+funciones `SECURITY DEFINER` que devuelven un identificador y nada más:
+`abrir_sesion`, `anotar` y `cerrar_sesion`. El rol no conserva ningún privilegio de tabla.
+
+**El identificador de sesión no es una credencial.** Viaja por la URL de un QR, por el
+historial del navegador, por las cabeceras y por los logs. `abrir_sesion` devuelve además
+un **secreto** del que solo se guarda el `sha256`, y sin él no se anota ni se cierra. La
+comprobación cubre a la vez tres cosas —secreto correcto, sesión abierta, campaña en
+ventana— y rechaza con **un único mensaje**: distinguir el motivo convertiría la función
+en un oráculo sobre qué sesiones existen.
+
+Esto obliga a cambiar el criterio P2, que en su primera redacción pedía que el INSERT
+directo funcionara. Mientras exista ese INSERT el secreto es decorativo, porque se escribe
+saltándose la comprobación. O una cosa o la otra; se elige la que protege.
+
+La anotación entra entera en una llamada —entidad, afecto, atribuciones y nota—, que son
+los cuatro pasos de §5.1 y son un solo acto.
+
 ## 3. Alternativas descartadas
 
 **Umbral en la capa de aplicación.** Es exactamente lo que CLAUDE.md llama configuración:
@@ -634,6 +672,21 @@ tampoco puede hacerlo su fecha.
 espacios de una zona produce una celda de cinco que es una sola respondente. La letra de
 §7 dice anotaciones; contar sesiones es más estricto, así que la cumple.
 
+**`GRANT SELECT (id)` sobre `captura` para que funcione el `RETURNING`.** Es lo que se
+hizo primero y era un canal lateral: permite `select id from captura.anotacion_borrador`,
+que enumera la cadencia de recogida. Corregido en `0012` y `0014`.
+
+**RLS con política `SELECT USING (false)` sobre `captura`.** Corta la enumeración pero
+mata el `INSERT ... RETURNING`, que es lo que la API necesita. Comprobado contra el motor,
+no deducido.
+
+**Tratar el identificador de sesión como credencial.** Viaja por la URL del QR, el
+historial y los logs. Un secreto aparte, del que solo se guarda el hash, es lo que ata la
+escritura a quien abrió la sesión.
+
+**Comparar solo el estado final para probar reversibilidad.** Insensible a una reversión
+incompleta, porque la reaplicación la tapa. Ver criterio M3.
+
 **El índice de Rand ajustado como prueba de no reconstitución.** Mide el caso medio y
 esconde justo el caso que importa: un grupo formado por una única sesión queda diluido en
 una media que sale buena. La prueba es de peor caso (criterio A6).
@@ -654,8 +707,15 @@ anterior: **V1** era el criterio 28, **A6** sustituye al 18 y **U8** era el 11.
 - **P1.** Como `espazio_analisis`, `SELECT` sobre `anotacion.anotacion`,
   `anotacion.celda_recuento`, `captura.sesion` y `cualitativo.nota` falla con
   `42501 insufficient_privilege`.
-- **P2.** Como `espazio_captura`, `INSERT` en `captura.anotacion_borrador` tiene éxito y
-  `SELECT` sobre `anotacion.anotacion` falla con `42501`.
+- **P2.** *(Reescrito, ver §2.9.)* Como `espazio_captura`, la escritura por la API de
+  `captura` tiene éxito, y el `INSERT` directo sobre `captura.anotacion_borrador` falla con
+  `42501`. Ningún privilegio de tabla ni de columna sobre `captura` figura para ese rol en
+  `information_schema`. Ninguna consulta suya enumera borradores: `select id from
+  captura.anotacion_borrador` falla, no devuelve cero filas.
+- **P8.** `captura.anotar` con un secreto incorrecto falla con `42501`; con el que
+  devolvió `abrir_sesion`, entra. El identificador de sesión por sí solo no autoriza nada.
+- **P9.** `captura.anotar` sobre una sesión ya cerrada falla, y el mensaje de rechazo es
+  **idéntico** para secreto incorrecto, sesión cerrada y sesión inexistente.
 - **P3.** Como `espazio_analisis`, `SELECT` sobre cada vista de `analisis` tiene éxito.
 - **P4.** Ninguna vista de `analisis` depende de `cualitativo` (`pg_depend` devuelve
   conjunto vacío).
@@ -745,6 +805,24 @@ anterior: **V1** era el criterio 28, **A6** sustituye al 18 y **U8** era el 11.
   abierta falla.
 - **Z6.** `INSERT` en `captura.anotacion_borrador` sobre una entidad que no pertenece a
   ninguna zona vigente en ese momento falla.
+- **Z7.** Una anotación cuyo instante no cae en ninguna franja del instrumento falla **al
+  anotar**, no al consolidar, y no queda nada en el borrador. Fallar en la consolidación
+  tiraba el lote entero —el trabajo de varias sesiones— por una sola fila, y la tiraba
+  para quien anota fuera de la rejilla, que es quien entra antes de las siete.
+
+### Migraciones (M)
+
+- **M1.** Revertir todas las migraciones no deja ninguno de los esquemas del proyecto en
+  la base.
+- **M2.** Aplicar, revertir y reaplicar reproduce exactamente el mismo esquema: columnas,
+  tipos, restricciones, índices, vistas, funciones, disparadores y privilegios.
+- **M3.** **Migración a migración:** aplicar hasta N−1, aplicar N y revertir N devuelve
+  exactamente el estado de N−1. M2 por sí solo no basta y no es un matiz: una reversión
+  que se olvide de deshacer algo pasa M2 igualmente, porque la reaplicación lo vuelve a
+  poner. Se descubrió mutando el fichero de reversión de `0014`, que M2 dejaba pasar, y al
+  añadir M3 aparecieron dos defectos reales en las reversiones de `0011` y `0014`.
+  Salvedad: los roles son objetos de clúster y `0002` no los borra a propósito, así que
+  ese caso queda fuera de la huella.
 
 ### Viabilidad (V)
 
@@ -771,6 +849,10 @@ anterior: **V1** era el criterio 28, **A6** sustituye al 18 y **U8** era el 11.
 - **Horas de corte de las franjas y su huso.** Han dejado de estar aquí: son decisión del
   instrumento y viven en `PROYECTO.md` §5.5, con su problema conocido —no cubren el día
   entero y dejan fuera el turno de mañana temprano— apuntado allí.
+- **Que las franjas cubran el día entero.** Implementada la comprobación al anotar
+  (criterio Z7), sigue abierto si la rejilla de `PROYECTO.md` §5.5 debe cubrir las
+  veinticuatro horas. Hoy quien anota antes de las siete recibe un rechazo, que es mejor
+  que tumbar el lote pero sigue siendo un rechazo.
 - **`cobertura_campana` como vista publicada.** Sale de `analisis` y queda en la zona
   restringida como cifra operativa.
 - **La dispersión dentro de la celda** y el desglose por etiqueta en la superficie
@@ -783,10 +865,6 @@ anterior: **V1** era el criterio 28, **A6** sustituye al 18 y **U8** era el 11.
   debajo del umbral. Es material cualitativo, no capa de anotación, y queda fuera de este
   esquema por completo.
 - **El generador de datos sintéticos** en sí. Su especificación es otra decisión.
-- **La validación de franja en captura.** Hoy una anotación cuyo instante no cae en
-  ninguna franja entra en el borrador sin protestar y hace fallar la consolidación del
-  lote entero. Falla ruidosamente, que es lo correcto, pero tarde. Pendiente: o las
-  franjas cubren el día entero (`PROYECTO.md` §5.5) o hace falta comprobarlo al anotar.
 - **La interfaz de captura.** Aquí solo se fija qué queda registrado.
 
 ## 6. Riesgos y coste de reversión

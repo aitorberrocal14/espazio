@@ -77,6 +77,7 @@ class SesionPlan:
     semana_iso: date
     grupos: set[tuple] = field(default_factory=set)
     n_anotaciones: int = 0
+    secreto: str = ""   # solo lo conoce quien abrió la sesión; se destruye al consolidar
 
 
 def sembrar_instrumento(conn, version_id: int = 1, codigo: str = "v1-pruebas") -> int:
@@ -189,6 +190,10 @@ def sembrar_sesion(conn, campana_id: UUID, venue: Venue, *, grupo_rol: str, zona
                    franja_extra: str | None = None) -> SesionPlan:
     """Una sesión con sus anotaciones en `zona`, `semana_iso` y `franja`.
 
+    Pasa por la API de escritura, que es la vía real: espazio_captura no tiene ningún
+    privilegio sobre las tablas de captura y necesita el secreto que devuelve
+    `abrir_sesion` para anotar o cerrar.
+
     `franja_extra` añade una anotación más en otra franja de la misma semana, para que la
     sesión toque dos grupos A6. Sirve para provocar el caso en que excluir una sesión
     deja unitario el grupo de otra.
@@ -197,11 +202,9 @@ def sembrar_sesion(conn, campana_id: UUID, venue: Venue, *, grupo_rol: str, zona
     atribuciones = [c for c, *_ in ATRIBUCIONES]
     anclajes = venue.recintos[zona] + venue.aristas[zona]
     with conn.cursor() as cur:
-        # Por la API de escritura, que es la vía real: espazio_captura no tiene SELECT
-        # sobre captura y no puede hacer INSERT ... RETURNING por su cuenta (0012).
-        cur.execute("select captura.abrir_sesion(%s,%s,%s,%s,%s)",
+        cur.execute("select sesion_id, secreto from captura.abrir_sesion(%s,%s,%s,%s,%s)",
                     (campana_id, venue.id, grupo_rol, modo, lengua))
-        sesion_id = cur.fetchone()[0]
+        sesion_id, secreto = cur.fetchone()
         for i in range(n_anotaciones):
             anclaje = anclajes[i % len(anclajes)]
             es_recinto = anclaje in venue.recintos[zona]
@@ -209,29 +212,27 @@ def sembrar_sesion(conn, campana_id: UUID, venue: Venue, *, grupo_rol: str, zona
             perm_e = etiquetas[:]; rng.shuffle(perm_e)
             perm_a = atribuciones[:]; rng.shuffle(perm_a)
             cur.execute(
-                "select captura.anotar(%s,%s,%s,%s,%s::smallint,%s,%s,%s,%s)",
-                (sesion_id, anclaje if es_recinto else None, None if es_recinto else anclaje,
-                 rng.choice(etiquetas), rng.randint(1, 3), "espontanea", perm_e, perm_a,
+                "select captura.anotar(%s,%s,%s,%s,%s,%s::smallint,%s,%s,%s,%s,%s,%s)",
+                (sesion_id, secreto,
+                 anclaje if es_recinto else None, None if es_recinto else anclaje,
+                 rng.choice(etiquetas), rng.randint(1, 3), "espontanea",
+                 [rng.choice(atribuciones)], perm_e, perm_a,
+                 "nota sintética" if con_nota else None,
                  momento_de(semana_iso, franja, dia=1 + (i % 5), minuto=i % 60)))
-            borrador_id = cur.fetchone()[0]
-            cur.execute("insert into captura.atribucion_borrador (anotacion_id, atribucion)"
-                        " values (%s,%s)", (borrador_id, rng.choice(atribuciones)))
-            if con_nota:
-                cur.execute("insert into captura.nota_borrador (anotacion_id, texto)"
-                            " values (%s,%s)", (borrador_id, "nota sintética"))
         total = n_anotaciones
         grupos = {(grupo_rol, semana_iso, franja)}
         if franja_extra is not None:
             perm_e = etiquetas[:]; rng.shuffle(perm_e)
             perm_a = atribuciones[:]; rng.shuffle(perm_a)
             cur.execute(
-                "select captura.anotar(%s,%s,%s,%s,%s::smallint,%s,%s,%s,%s)",
-                (sesion_id, venue.recintos[zona][0], None, rng.choice(etiquetas),
-                 rng.randint(1, 3), "cierre_positivo", perm_e, perm_a,
+                "select captura.anotar(%s,%s,%s,%s,%s,%s::smallint,%s,%s,%s,%s,%s,%s)",
+                (sesion_id, secreto, venue.recintos[zona][0], None,
+                 rng.choice(etiquetas), rng.randint(1, 3), "cierre_positivo",
+                 [rng.choice(atribuciones)], perm_e, perm_a, None,
                  momento_de(semana_iso, franja_extra, dia=2)))
             total += 1
             grupos.add((grupo_rol, semana_iso, franja_extra))
         if cerrar:
-            cur.execute("select captura.cerrar_sesion(%s)", (sesion_id,))
+            cur.execute("select captura.cerrar_sesion(%s,%s)", (sesion_id, secreto))
     return SesionPlan(id=sesion_id, grupo_rol=grupo_rol, zona=zona, semana_iso=semana_iso,
-                      grupos=grupos, n_anotaciones=total)
+                      grupos=grupos, n_anotaciones=total, secreto=secreto)

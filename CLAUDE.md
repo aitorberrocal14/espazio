@@ -56,6 +56,11 @@ disculpas después.
 7. **Las métricas nunca se emiten como número solo.** Toda salida lleva a quién afecta,
    comparación contra el resto del edificio y delta respecto al estado actual
    (`PROYECTO.md` §6.1).
+8. **Toda decisión que particione a las personas se revisa contra los roles de menor poder
+   y disponibilidad antes de fijarse, y la revisión se escribe.** Franjas, grupos de rol,
+   zonas, umbrales, canales de captación. Ya han fallado tres por defecto y las tres
+   excluyeron al mismo colectivo (`PROYECTO.md` §8). Una decisión de partición sin esa
+   revisión está incompleta.
 
 ## Estructura
 

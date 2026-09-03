@@ -9,7 +9,8 @@ y se modifica aquí antes de tocar código.
 
 Autor: Aitor Berrocal Lorda
 Estado: fase 0 (núcleo)
-Última revisión: 2026-09-03 — §5.2 (orden de presentación), §5.5 (franjas y huso), §8 (límites del umbral)
+Última revisión: 2026-09-03 — §5.2 (orden de presentación), §5.5 (franjas y huso),
+§8 (límites del umbral y control de partición)
 
 ---
 
@@ -324,6 +325,24 @@ Van aquí porque condicionan el diseño, no porque queden bonitos.
   tiene que cubrirla por otra vía: entrevista, material cualitativo que se lee y no se
   agrega, como la nota libre de §5.1. No hacerlo no es una omisión menor: es entregar un
   mapa que dice «el edificio» y significa «quienes tienen despacho».
+- **El mismo colectivo cae por el mismo mecanismo, y ya van tres.** No es mala suerte, es
+  un modo de fallo del diseño. Ocurrió con el umbral cuando contaba anotaciones en vez de
+  personas; con el techo de zonas publicables, que lo fija el grupo pequeño; y con la
+  rejilla horaria, que empezaba a las siete y dejaba fuera al turno que entra antes. En
+  los tres casos la exclusión la produjo una decisión tomada **por defecto**, sin que
+  nadie la eligiera como tal, y en los tres cayó sobre conserjería, limpieza y
+  mantenimiento. Ninguna se tomó contra ellos. Todas los dejaron fuera.
+
+  El patrón tiene forma reconocible: cualquier criterio que reparta a las personas en
+  celdas favorece a quien tiene masa y disponibilidad, y quien no las tiene desaparece sin
+  que aparezca ningún error.
+
+  **Esto se escribe como control, no como advertencia:** toda decisión que particione a
+  las personas —franjas horarias, grupos de rol, zonas, umbrales, canales de captación—
+  **se revisa explícitamente contra los roles de menor poder y disponibilidad antes de
+  fijarse, y la revisión se escribe.** Una decisión de partición sin esa revisión está
+  incompleta, igual que lo está un cambio sin test.
+
 - **La herramienta no decide.** Qué es un punto negro y qué es una zona fantasma
   deseable sigue siendo una cuestión política. Una sala vacía puede ser mala
   planificación o el único sitio tranquilo del edificio.

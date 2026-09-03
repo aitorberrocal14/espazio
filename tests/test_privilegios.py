@@ -34,39 +34,50 @@ def test_p1_analisis_no_alcanza_la_fila(conn, tabla):
         assert err.value.sqlstate == "42501"
 
 
-def test_p2_captura_escribe_y_no_lee(conn):
-    """P2 — el formulario escribe en captura y no puede leer nada, ni siquiera lo suyo."""
+def _abrir(conn, campana, venue, rol="pdi"):
+    return conn.execute("select sesion_id, secreto from captura.abrir_sesion(%s,%s,%s,"
+                        "'in_situ','es')", (campana, venue.id, rol)).fetchone()
+
+
+def _anotar(conn, sesion, secreto, recinto, elicitacion="espontanea"):
+    return conn.execute(
+        "select captura.anotar(%s,%s,%s,null,'agradable',2::smallint,%s,%s,%s,%s)",
+        (sesion, secreto, recinto, elicitacion, ["ruido"],
+         [c for c, *_ in gen.VOCABULARIO], [c for c, *_ in gen.ATRIBUCIONES])).fetchone()[0]
+
+
+def test_p2_captura_escribe_solo_por_la_api(conn):
+    """P2 — la zona de captura es accesible únicamente por la API de escritura.
+
+    Cambió respecto a la primera redacción del criterio, que pedía INSERT directo: con
+    INSERT directo el secreto de sesión es decorativo, porque se escribe saltándose la
+    comprobación. O una cosa o la otra.
+    """
     version = gen.sembrar_instrumento(conn)
     venue = gen.sembrar_venue(conn, zonas=["z0"], grupos_rol=["pdi"])
     campana = gen.sembrar_campana(conn, venue, version)
 
     with como(conn, "espazio_captura"):
-        # La vía real: la API de escritura devuelve el id de lo que acaba de crear.
-        sesion_id = conn.execute(
-            "select captura.abrir_sesion(%s,%s,'pdi','in_situ','es')",
-            (campana, venue.id)).fetchone()[0]
-        assert sesion_id is not None
-        borrador_id = conn.execute(
-            "select captura.anotar(%s,%s,null,'agradable',2::smallint,'espontanea',%s,%s)",
-            (sesion_id, venue.recintos["z0"][0],
-             [c for c, *_ in gen.VOCABULARIO], [c for c, *_ in gen.ATRIBUCIONES])).fetchone()[0]
-        assert borrador_id is not None
-
-        # Y el INSERT directo sigue entrando (el criterio, en su letra).
-        conn.execute(
-            "insert into captura.anotacion_borrador (sesion_id, recinto_id, etiqueta,"
-            " intensidad, elicitacion, permutacion_etiquetas, permutacion_atribuciones)"
-            " values (%s,%s,'tranquilo',1,'cierre_positivo',%s,%s)",
-            (sesion_id, venue.recintos["z0"][0],
-             [c for c, *_ in gen.VOCABULARIO], [c for c, *_ in gen.ATRIBUCIONES]))
+        sesion, secreto = _abrir(conn, campana, venue)
+        assert sesion is not None and secreto
+        assert _anotar(conn, sesion, secreto, venue.recintos["z0"][0]) is not None
 
         with punto_de_guardado(conn):
             with pytest.raises(psycopg.errors.InsufficientPrivilege) as err:
-                conn.execute("select * from anotacion.anotacion limit 1")
+                conn.execute(
+                    "insert into captura.anotacion_borrador (sesion_id, recinto_id,"
+                    " etiqueta, intensidad, elicitacion, permutacion_etiquetas,"
+                    " permutacion_atribuciones) values (%s,%s,'tenso',1,'espontanea',%s,%s)",
+                    (sesion, venue.recintos["z0"][0],
+                     [c for c, *_ in gen.VOCABULARIO], [c for c, *_ in gen.ATRIBUCIONES]))
             assert err.value.sqlstate == "42501"
 
+        with punto_de_guardado(conn):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                conn.execute("select * from anotacion.anotacion limit 1")
+
     assert conn.execute("select count(*) from captura.anotacion_borrador"
-                        " where sesion_id = %s", (sesion_id,)).fetchone()[0] == 2
+                        " where sesion_id = %s", (sesion,)).fetchone()[0] == 1
 
 
 @pytest.mark.parametrize("consulta", [
@@ -77,26 +88,76 @@ def test_p2_captura_escribe_y_no_lee(conn):
 ])
 def test_p2_captura_no_puede_enumerar_borradores(conn, consulta):
     """Enumerar borradores revela la cadencia de recogida —cuántas personas anotan y
-    cuándo— sin leer una sola anotación. Por eso la zona de captura no concede SELECT,
-    ni de tabla ni de columna, y el id sale del propio INSERT dentro de la API."""
+    cuándo— sin leer una sola anotación."""
     with como(conn, "espazio_captura"), punto_de_guardado(conn):
         with pytest.raises(psycopg.errors.InsufficientPrivilege) as err:
             conn.execute(consulta)
         assert err.value.sqlstate == "42501"
 
 
-def test_p2_captura_no_tiene_select_ni_de_tabla_ni_de_columna(conn):
-    """La comprobación estructural, por si alguien reintroduce el grant que 0012 quitó."""
-    de_tabla = conn.execute(
-        "select table_name from information_schema.table_privileges"
-        " where grantee='espazio_captura' and privilege_type='SELECT'"
-        "   and table_schema='captura'").fetchall()
-    de_columna = conn.execute(
-        "select table_name, column_name from information_schema.column_privileges"
-        " where grantee='espazio_captura' and privilege_type='SELECT'"
-        "   and table_schema='captura'").fetchall()
-    assert de_tabla == [], f"SELECT de tabla sobre captura: {de_tabla}"
-    assert de_columna == [], f"SELECT de columna sobre captura: {de_columna}"
+def test_p2_captura_no_tiene_ningun_privilegio_de_tabla(conn):
+    """Estructural: si alguien reintroduce cualquier grant sobre captura, aquí se ve."""
+    privilegios = conn.execute(
+        "select table_name, privilege_type from information_schema.table_privileges"
+        " where grantee='espazio_captura' and table_schema='captura'").fetchall()
+    columnas = conn.execute(
+        "select table_name, column_name, privilege_type"
+        " from information_schema.column_privileges"
+        " where grantee='espazio_captura' and table_schema='captura'").fetchall()
+    assert privilegios == [], f"privilegios de tabla sobre captura: {privilegios}"
+    assert columnas == [], f"privilegios de columna sobre captura: {columnas}"
+
+
+def test_p8_el_id_de_sesion_no_basta_para_escribir_en_ella(conn):
+    """P8 — el id de sesión viaja por URL, historial y logs. No es una credencial."""
+    version = gen.sembrar_instrumento(conn)
+    venue = gen.sembrar_venue(conn, zonas=["z0"], grupos_rol=["pdi"])
+    campana = gen.sembrar_campana(conn, venue, version)
+
+    with como(conn, "espazio_captura"):
+        sesion, secreto = _abrir(conn, campana, venue)
+        with punto_de_guardado(conn):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                _anotar(conn, sesion, str(uuid.uuid4()), venue.recintos["z0"][0])
+        # Con el correcto, entra.
+        assert _anotar(conn, sesion, secreto, venue.recintos["z0"][0]) is not None
+
+
+def test_p9_no_se_anota_en_una_sesion_cerrada(conn):
+    """P9 — cerrar la sesión cierra la escritura, aunque se tenga el secreto."""
+    version = gen.sembrar_instrumento(conn)
+    venue = gen.sembrar_venue(conn, zonas=["z0"], grupos_rol=["pdi"])
+    campana = gen.sembrar_campana(conn, venue, version)
+
+    with como(conn, "espazio_captura"):
+        sesion, secreto = _abrir(conn, campana, venue)
+        _anotar(conn, sesion, secreto, venue.recintos["z0"][0])
+        conn.execute("select captura.cerrar_sesion(%s,%s)", (sesion, secreto))
+        with punto_de_guardado(conn):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                _anotar(conn, sesion, secreto, venue.recintos["z0"][0],
+                        elicitacion="cierre_positivo")
+
+
+def test_p9_el_rechazo_no_distingue_el_motivo(conn):
+    """Un mensaje distinto por motivo convertiría la función en un oráculo sobre qué
+    sesiones existen y cuáles siguen abiertas."""
+    version = gen.sembrar_instrumento(conn)
+    venue = gen.sembrar_venue(conn, zonas=["z0"], grupos_rol=["pdi"])
+    campana = gen.sembrar_campana(conn, venue, version)
+    with como(conn, "espazio_captura"):
+        sesion, secreto = _abrir(conn, campana, venue)
+        conn.execute("select captura.cerrar_sesion(%s,%s)", (sesion, secreto))
+        mensajes = set()
+        for ses, sec in [(sesion, str(uuid.uuid4())),      # secreto incorrecto
+                         (sesion, secreto),                # sesión cerrada
+                         (uuid.uuid4(), secreto)]:         # sesión inexistente
+            with punto_de_guardado(conn):
+                try:
+                    _anotar(conn, ses, sec, venue.recintos["z0"][0])
+                except psycopg.errors.InsufficientPrivilege as e:
+                    mensajes.add(str(e).strip())
+        assert len(mensajes) == 1, f"el rechazo distingue motivos: {mensajes}"
 
 
 def test_p3_analisis_lee_todas_las_vistas_publicadas(conn):
