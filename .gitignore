@@ -1,0 +1,20 @@
+# Datos: nunca en git.
+# Los planos pesan; las anotaciones son datos de personas sobre su lugar de
+# trabajo o estudio. Ver PROYECTO.md §7.
+data/
+*.dwg
+*.dxf
+*.ifc
+exports/
+dumps/
+
+# Entorno
+.env
+.env.*
+!.env.example
+venv/
+__pycache__/
+*.pyc
+node_modules/
+.next/
+.DS_Store
