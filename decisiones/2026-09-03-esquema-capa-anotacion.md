@@ -768,9 +768,9 @@ anterior: **V1** era el criterio 28, **A6** sustituye al 18 y **U8** era el 11.
   los versiona; los valores son dato semilla pendiente de la validación de §5.2.
 - **Lista de grupos de rol del piloto**: dato semilla, pendiente.
 - **Definición de las zonas del piloto**: dato semilla, pendiente.
-- **Horas de corte de las franjas**: propuesta de partida `manana` 07–12, `mediodia`
-  12–15, `tarde` 15–19, `noche` 19–23, pendiente de confirmación. Cambiarlas después de
-  recoger rompe la comparabilidad igual que cambiar el vocabulario.
+- **Horas de corte de las franjas y su huso.** Han dejado de estar aquí: son decisión del
+  instrumento y viven en `PROYECTO.md` §5.5, con su problema conocido —no cubren el día
+  entero y dejan fuera el turno de mañana temprano— apuntado allí.
 - **`cobertura_campana` como vista publicada.** Sale de `analisis` y queda en la zona
   restringida como cifra operativa.
 - **La dispersión dentro de la celda** y el desglose por etiqueta en la superficie
@@ -783,6 +783,10 @@ anterior: **V1** era el criterio 28, **A6** sustituye al 18 y **U8** era el 11.
   debajo del umbral. Es material cualitativo, no capa de anotación, y queda fuera de este
   esquema por completo.
 - **El generador de datos sintéticos** en sí. Su especificación es otra decisión.
+- **La validación de franja en captura.** Hoy una anotación cuyo instante no cae en
+  ninguna franja entra en el borrador sin protestar y hace fallar la consolidación del
+  lote entero. Falla ruidosamente, que es lo correcto, pero tarde. Pendiente: o las
+  franjas cubren el día entero (`PROYECTO.md` §5.5) o hace falta comprobarlo al anotar.
 - **La interfaz de captura.** Aquí solo se fija qué queda registrado.
 
 ## 6. Riesgos y coste de reversión
@@ -826,9 +830,12 @@ campaña nueva, con su propia evaluación de impacto, ampliando el `CHECK` de
 cualquier vista o función. Protege frente a endpoints nuevos, exports descuidados, el rol
 de análisis y el olvido, que es de donde vienen estas fugas en la práctica.
 
-**R7 — El contrato del núcleo puede no cumplirse.** Si el esquema núcleo acaba anclando a
-versiones en lugar de a identidades estables, esta capa se rompe entera. Coste de
-reversión: alto, y crece con cada anotación recogida.
+**R7 — El contrato del núcleo puede no cumplirse, y hoy nadie lo vigila.** Si el esquema
+núcleo acaba anclando a versiones en lugar de a identidades estables, esta capa se rompe
+entera. Coste de reversión: alto, y crece con cada anotación recogida. El esqueleto que
+implementa `0003_nucleo_contrato.sql` satisface las claves ajenas y **no verifica el
+contrato**: ningún test se pondría rojo si el núcleo se diseñara mal. Queda anotado como
+deuda explícita en `decisiones/2026-09-03-pendiente-contrato-nucleo.md`.
 
 **R9 — El doble umbral restringe cuántas zonas y cuántas franjas puede tener el diseño.**
 No es solo que estreche lo publicable: fija un techo aritmético que ninguna decisión de

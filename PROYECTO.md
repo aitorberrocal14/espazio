@@ -9,7 +9,7 @@ y se modifica aquí antes de tocar código.
 
 Autor: Aitor Berrocal Lorda
 Estado: fase 0 (núcleo)
-Última revisión: 2026-09-03 — §5.2 (orden de presentación) y §8 (límites del umbral)
+Última revisión: 2026-09-03 — §5.2 (orden de presentación), §5.5 (franjas y huso), §8 (límites del umbral)
 
 ---
 
@@ -203,6 +203,29 @@ solo aparecen in situ son los invisibles en el relato del edificio.
 - **Se registra el momento.** Un aula a las nueve y a las cinco no es el mismo espacio.
   Con timestamp y franja horaria la variación temporal sale gratis, y es probablemente
   el hallazgo más accionable del instrumento.
+
+  Por eso mismo **las franjas y su huso horario son decisión del instrumento**, no
+  configuración: cambiarlas después de recoger invalida la cohorte igual que cambiar el
+  vocabulario o la escala de intensidad, porque los datos anteriores quedan repartidos
+  con otro rasero. Van aquí y no en el código.
+
+  Huso: **`Europe/Madrid`**. Las franjas se evalúan sobre hora local, nunca sobre UTC.
+
+  | franja | desde | hasta |
+  |---|---|---|
+  | `manana` | 07:00 | 12:00 |
+  | `mediodia` | 12:00 | 15:00 |
+  | `tarde` | 15:00 | 19:00 |
+  | `noche` | 19:00 | 23:00 |
+
+  **Estos cortes están sin confirmar y tienen un problema conocido.** No cubren el día
+  entero: una anotación fuera de 07:00–23:00 no cae en ninguna franja. Y quien entra
+  antes de las siete es, típicamente, el turno de limpieza y mantenimiento, es decir el
+  colectivo que §8 ya identifica como estructuralmente invisible. Fijar el corte a las
+  siete lo deja fuera dos veces. Antes de recoger hay que contrastar los cortes contra
+  los turnos reales del edificio, y decidir si el día se cubre entero. El número de
+  franjas no es gratis: entra en el denominador del umbral de publicación, así que más
+  franjas es menos publicable.
 
 ## 6. Análisis
 

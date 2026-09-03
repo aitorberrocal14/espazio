@@ -35,38 +35,68 @@ def test_p1_analisis_no_alcanza_la_fila(conn, tabla):
 
 
 def test_p2_captura_escribe_y_no_lee(conn):
-    """P2 — el formulario inserta en captura y no puede leer el dato consolidado."""
+    """P2 — el formulario escribe en captura y no puede leer nada, ni siquiera lo suyo."""
     version = gen.sembrar_instrumento(conn)
     venue = gen.sembrar_venue(conn, zonas=["z0"], grupos_rol=["pdi"])
     campana = gen.sembrar_campana(conn, venue, version)
 
-    sesion_id = uuid.uuid4()
     with como(conn, "espazio_captura"):
-        # El id lo genera el cliente: espazio_captura no tiene SELECT sobre el contenido.
-        conn.execute(
-            "insert into captura.sesion (id, campana_id, venue_id, grupo_rol, modo, lengua)"
-            " values (%s,%s,%s,'pdi','in_situ','es')", (sesion_id, campana, venue.id))
+        # La vía real: la API de escritura devuelve el id de lo que acaba de crear.
+        sesion_id = conn.execute(
+            "select captura.abrir_sesion(%s,%s,'pdi','in_situ','es')",
+            (campana, venue.id)).fetchone()[0]
+        assert sesion_id is not None
+        borrador_id = conn.execute(
+            "select captura.anotar(%s,%s,null,'agradable',2::smallint,'espontanea',%s,%s)",
+            (sesion_id, venue.recintos["z0"][0],
+             [c for c, *_ in gen.VOCABULARIO], [c for c, *_ in gen.ATRIBUCIONES])).fetchone()[0]
+        assert borrador_id is not None
+
+        # Y el INSERT directo sigue entrando (el criterio, en su letra).
         conn.execute(
             "insert into captura.anotacion_borrador (sesion_id, recinto_id, etiqueta,"
             " intensidad, elicitacion, permutacion_etiquetas, permutacion_atribuciones)"
-            " values (%s,%s,'agradable',2,'espontanea',%s,%s)",
+            " values (%s,%s,'tranquilo',1,'cierre_positivo',%s,%s)",
             (sesion_id, venue.recintos["z0"][0],
              [c for c, *_ in gen.VOCABULARIO], [c for c, *_ in gen.ATRIBUCIONES]))
 
-        # No puede leer el dato consolidado…
         with punto_de_guardado(conn):
             with pytest.raises(psycopg.errors.InsufficientPrivilege) as err:
                 conn.execute("select * from anotacion.anotacion limit 1")
             assert err.value.sqlstate == "42501"
 
-        # …ni el contenido de lo que él mismo acaba de escribir.
-        with punto_de_guardado(conn):
-            with pytest.raises(psycopg.errors.InsufficientPrivilege):
-                conn.execute("select etiqueta from captura.anotacion_borrador limit 1")
-
-    # Y sin embargo la inserción entró de verdad.
     assert conn.execute("select count(*) from captura.anotacion_borrador"
-                        " where sesion_id = %s", (sesion_id,)).fetchone()[0] == 1
+                        " where sesion_id = %s", (sesion_id,)).fetchone()[0] == 2
+
+
+@pytest.mark.parametrize("consulta", [
+    "select * from captura.anotacion_borrador",
+    "select id from captura.anotacion_borrador",     # enumerar es el canal lateral
+    "select count(*) from captura.anotacion_borrador",
+    "select id from captura.sesion",
+])
+def test_p2_captura_no_puede_enumerar_borradores(conn, consulta):
+    """Enumerar borradores revela la cadencia de recogida —cuántas personas anotan y
+    cuándo— sin leer una sola anotación. Por eso la zona de captura no concede SELECT,
+    ni de tabla ni de columna, y el id sale del propio INSERT dentro de la API."""
+    with como(conn, "espazio_captura"), punto_de_guardado(conn):
+        with pytest.raises(psycopg.errors.InsufficientPrivilege) as err:
+            conn.execute(consulta)
+        assert err.value.sqlstate == "42501"
+
+
+def test_p2_captura_no_tiene_select_ni_de_tabla_ni_de_columna(conn):
+    """La comprobación estructural, por si alguien reintroduce el grant que 0012 quitó."""
+    de_tabla = conn.execute(
+        "select table_name from information_schema.table_privileges"
+        " where grantee='espazio_captura' and privilege_type='SELECT'"
+        "   and table_schema='captura'").fetchall()
+    de_columna = conn.execute(
+        "select table_name, column_name from information_schema.column_privileges"
+        " where grantee='espazio_captura' and privilege_type='SELECT'"
+        "   and table_schema='captura'").fetchall()
+    assert de_tabla == [], f"SELECT de tabla sobre captura: {de_tabla}"
+    assert de_columna == [], f"SELECT de columna sobre captura: {de_columna}"
 
 
 def test_p3_analisis_lee_todas_las_vistas_publicadas(conn):

@@ -85,11 +85,11 @@ CREATE TRIGGER exige_traduccion_completa
   FOR EACH ROW EXECUTE FUNCTION instrumento.exige_traduccion_completa();
 
 -- Franja a partir del instante local.
--- HUECO DE LA ESPECIFICACIÓN: §5.5 pide franja horaria y la decisión define las franjas
--- como horas locales, pero ninguna de las dos dice de qué zona horaria. Se fija aquí a
--- Europe/Madrid, que es la del piloto. Antes de un segundo venue hay que decidir dónde
--- vive la zona horaria; añadir una columna a campana sería tocar el esquema sin
--- especificación, así que no se hace.
+-- El huso lo fija PROYECTO.md §5.5 como decisión del instrumento, no el código: cambiarlo
+-- después de recoger invalida la cohorte. Aquí solo se aplica.
+-- Pendiente asociado: los cortes de §5.5 no cubren el día entero, así que una anotación
+-- fuera de 07:00–23:00 no tiene franja y la consolidación falla al llegar a ella. Falla
+-- ruidosamente y no en silencio, que es lo correcto, pero tumba el lote entero.
 CREATE FUNCTION instrumento.franja_de(p_version smallint, p_momento timestamptz)
   RETURNS text LANGUAGE sql STABLE AS $$
   SELECT f.codigo FROM instrumento.franja f

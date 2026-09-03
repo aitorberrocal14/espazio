@@ -73,3 +73,8 @@ def punto_de_guardado(cn):
         yield
     finally:
         cn.execute(f"rollback to savepoint {nombre}")
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "mutacion: desactiva una protección y comprueba que la suite lo detecta")

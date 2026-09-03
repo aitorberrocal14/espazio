@@ -49,8 +49,10 @@ disculpas después.
    consulta o export que pueda devolver un desglose por debajo del umbral es un bug de
    seguridad, no una mejora pendiente.
 6. **El instrumento de anotación no se modifica sin revisión.** Vocabulario afectivo,
-   orden de los pasos, escala de intensidad y modo de anclaje son decisiones teóricas
-   documentadas en `PROYECTO.md` §5. Cambiarlas invalida los datos ya recogidos.
+   orden de los pasos, escala de intensidad, modo de anclaje, granularidad de la
+   aleatorización, y franjas horarias con su huso son decisiones teóricas documentadas en
+   `PROYECTO.md` §5. Cambiarlas invalida los datos ya recogidos. Ninguna de ellas se fija
+   en el código: si el código está eligiendo el valor, la decisión no está tomada.
 7. **Las métricas nunca se emiten como número solo.** Toda salida lleva a quién afecta,
    comparación contra el resto del edificio y delta respecto al estado actual
    (`PROYECTO.md` §6.1).
