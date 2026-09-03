@@ -4,6 +4,8 @@ Fecha: 2026-09-03
 Estado: propuesta, pendiente de aprobación
 Ámbito: fase 0
 Afecta a: `esquema/` (migraciones), `datos_sinteticos/`, contrato con el esquema núcleo IMDF
+**Bloqueado esperando dato externo: ver §7. No es deuda técnica y no se desbloquea
+construyendo.**
 
 ---
 
@@ -849,10 +851,6 @@ anterior: **V1** era el criterio 28, **A6** sustituye al 18 y **U8** era el 11.
 - **Horas de corte de las franjas y su huso.** Han dejado de estar aquí: son decisión del
   instrumento y viven en `PROYECTO.md` §5.5, con su problema conocido —no cubren el día
   entero y dejan fuera el turno de mañana temprano— apuntado allí.
-- **Que las franjas cubran el día entero.** Implementada la comprobación al anotar
-  (criterio Z7), sigue abierto si la rejilla de `PROYECTO.md` §5.5 debe cubrir las
-  veinticuatro horas. Hoy quien anota antes de las siete recibe un rechazo, que es mejor
-  que tumbar el lote pero sigue siendo un rechazo.
 - **`cobertura_campana` como vista publicada.** Sale de `analisis` y queda en la zona
   restringida como cifra operativa.
 - **La dispersión dentro de la celda** y el desglose por etiqueta en la superficie
@@ -983,3 +981,46 @@ criterio del esquema falle. Lo vigila I6.
 son migraciones sobre tablas vacías. Después: el vocabulario, la escala de intensidad, el
 modo de anclaje y las franjas invalidan la cohorte; la estructura de zonas y la gramática
 de celdas se pueden cambiar sin perder dato.
+
+## 7. Bloqueado esperando dato externo
+
+Esto no es una lista de pendientes técnicos. Son decisiones que **no se pueden tomar
+desde dentro del repositorio**, y construir sobre ellas es construir sobre supuestos.
+
+### 7.1 La rejilla horaria
+
+La franja `07:00–23:00` de `PROYECTO.md` §5.5 no cubre el día. La comprobación de Z7 hace
+que eso falle limpio y a tiempo, en el `INSERT` del borrador, en lugar de tumbar el lote
+entero en la consolidación. Eso arregla el daño colateral. **No arregla el fondo.**
+
+El fondo es este: **hoy el sistema rechaza por diseño a quien entra antes de las siete.**
+Y desde fuera ese rechazo no se lee como una decisión de diseño ni como una restricción
+metodológica. Se lee como que la herramienta no funciona. Alguien de limpieza escanea el
+QR a las seis y media, escribe lo que piensa de un pasillo, le sale un error, y no vuelve
+a intentarlo. Lo que queda en los datos no es un rechazo registrado: es un silencio, y
+`PROYECTO.md` §8 ya dice que el silencio no es neutralidad.
+
+Es **la regla 8 activada y sin resolver**: una decisión de partición —la rejilla— tomada
+por defecto, que excluye al mismo colectivo que las tres anteriores. La revisión que la
+regla exige no se puede escribir sin saber a qué hora entra cada turno, y eso no está en
+el repositorio.
+
+No se desbloquea eligiendo unas horas plausibles. Se desbloquea con los turnos reales.
+
+### 7.2 Qué falta, y qué decisión de partición desbloquea cada cosa
+
+| dato externo | desbloquea |
+|---|---|
+| turnos reales del edificio | la rejilla horaria (§7.1) y el número de franjas `F`, que entra en el techo de publicación de R9 |
+| plantilla por categoría | los grupos de rol, y con ellos si `n_sesiones ≥ 5` es alcanzable por grupo (V1, R9) |
+| asignación de los 231 recintos | la zonificación, y con ella `Z`, el otro término del techo de R9 |
+
+Las tres son decisiones de partición en el sentido de la regla 8, y las tres se revisan
+contra los roles de menor poder y disponibilidad **antes** de fijarse. Ninguna se fija
+aquí.
+
+### 7.3 Qué no hacer mientras tanto
+
+No adelantar trabajo que dependa de ellas: seed de grupos de rol, definición de zonas del
+piloto, ajuste de franjas, ni ejecución de V1 con cifras inventadas. V1 con supuestos
+devuelve una viabilidad que no existe, y es peor que no ejecutarlo, porque parece un dato.
