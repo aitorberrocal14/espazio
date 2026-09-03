@@ -383,6 +383,13 @@ Fase 0 publica lo mínimo para demostrar que el umbral se sostiene:
 - `analisis.cobertura_campana` — recuentos agregados por grupo de rol para medir
   completitud sin identificador persistente, con el umbral aplicado.
 
+**La franja va siempre en la clave.** Fase 0 no publica ninguna marginal sobre franja, y
+por eso el único eje de marginalización de la superficie es `grupo_rol`, que es
+exactamente lo que cubre la regla de §2.2. Con dos ejes marginalizables a la vez, la
+supresión habría que resolverla sobre el retículo completo de agregaciones y la regla de
+§2.2 se quedaría corta. **Añadir después una vista marginal sobre franja no es añadir una
+vista: obliga a reescribir la regla de supresión.**
+
 El motor de divergencia (§6.1), la matriz de desacople (§6.2) y la capa de traducción son
 **fase 1** y no entran aquí.
 
@@ -511,8 +518,11 @@ Todos sobre datos sintéticos. Ninguno requiere datos reales de anotación.
     (`information_schema.table_constraints`).
 17. Un lote de consolidación con menos de 5 sesiones pendientes y la ventana de recogida
     abierta no consolida nada.
-18. Reconstitución: dado un escenario sintético de 30 sesiones, ninguna consulta sobre
-    `anotacion.*` agrupa las filas en sus sesiones de origen mejor que el azar.
+18. Reconstitución: sobre un escenario sintético de 30 sesiones con semilla fija, el
+    agrupamiento por `(campana_id, venue_id, grupo_rol, semana_iso, franja)` —la partición
+    más fina que permite el dato consolidado— recupera las sesiones de origen con un
+    índice de Rand ajustado inferior a 0,2 frente a la partición verdadera, que el test
+    conoce porque generó los datos.
 
 ### Instrumento
 19. `INSERT` de una anotación cuya etiqueta no pertenece a la versión de instrumento de
@@ -585,8 +595,10 @@ temporal, que §5.5 considera probablemente el hallazgo más accionable.
 
 **R4 — La supresión complementaria solo cubre la gramática declarada.** Añadir una vista
 nueva a `analisis` sin revisarla contra las existentes reabre el ataque por diferencia.
-Es la parte del diseño que se degrada con el uso, y por eso el criterio 11 debe
-re-ejecutarse en cada migración que toque `analisis`.
+El caso concreto que hay que vigilar es una **marginal sobre franja**: introduciría un
+segundo eje de marginalización y la regla de §2.2, escrita para uno solo, dejaría de
+cubrir la superficie. Es la parte del diseño que se degrada con el uso, y por eso el
+criterio 11 debe re-ejecutarse en cada migración que toque `analisis`.
 
 **R5 — El severamiento del identificador de sesión es irreversible por diseño.** Si en un
 año resulta que hacía falta agrupar por autor, los datos ya consolidados no lo permitirán
